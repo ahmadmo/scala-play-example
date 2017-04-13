@@ -1,0 +1,45 @@
+# Routes
+# This file defines all application routes (Higher priority routes first)
+# ~~~~
+
+# Home page
+GET           /                                                     ir.bama.controllers.Application.index
+
+# Map static resources from the /public folder to the /assets URL path
+GET           /assets/*file                                         controllers.Assets.versioned(path="/public", file: Asset)
+
+# Location
+GET           /province/list                                        ir.bama.controllers.LocationController.listProvinces(offset: Option[Int], length: Option[Int])
+GET           /city/list/:provinceId                                ir.bama.controllers.LocationController.listCities(provinceId: Long, offset: Option[Int], length: Option[Int])
+
+# Car Brand & Model
+POST          /car/brand/add                                        ir.bama.controllers.CarController.addBrand
+GET           /car/brand/list                                       ir.bama.controllers.CarController.listBrands(offset: Option[Int], length: Option[Int])
+GET           /car/brand/search/:name                               ir.bama.controllers.CarController.searchBrands(name, offset: Option[Int], length: Option[Int])
+POST          /car/model/:brandId/add                               ir.bama.controllers.CarController.addModel(brandId: Long)
+GET           /car/model/list/:brandId                              ir.bama.controllers.CarController.listModels(brandId: Long, offset: Option[Int], length: Option[Int])
+GET           /car/model/search/:brandId/:name                      ir.bama.controllers.CarController.searchModels(brandId: Long, name, offset: Option[Int], length: Option[Int])
+
+# Auth
+POST          /auth/login                                           ir.bama.controllers.AuthController.login
+GET           /auth/me                                              ir.bama.controllers.AuthController.me
+GET           /auth/login/list                                      ir.bama.controllers.AuthController.listLogins
+POST          /auth/token                                           ir.bama.controllers.AuthController.refreshToken
+POST          /auth/logout                                          ir.bama.controllers.AuthController.logout(from ?= "this")
+
+# File
+GET           /file/:name                                           ir.bama.controllers.FileController.serveFile(name)
+
+# Seller
+POST          /seller/register                                      ir.bama.controllers.SellerController.register
+PUT           /seller/photo/upload                                  ir.bama.controllers.SellerController.uploadPhoto
+DELETE        /seller/photo/delete                                  ir.bama.controllers.SellerController.deletePhoto
+GET           /seller/info/:id                                      ir.bama.controllers.SellerController.load(id: Long)
+GET           /seller/info                                          ir.bama.controllers.SellerController.loadByUser
+GET           /seller/list                                          ir.bama.controllers.SellerController.list(offset: Int ?= 0, length: Int ?= 10)
+GET           /seller/list/:sellerType                              ir.bama.controllers.SellerController.listByType(sellerType, offset: Int ?= 0, length: Int ?= 10)
+GET           /seller/list/:location/:locationId                    ir.bama.controllers.SellerController.listByLocation(location, locationId: Long, offset: Int ?= 0, length: Int ?= 10)
+GET           /seller/list/:sellerType/:location/:locationId        ir.bama.controllers.SellerController.listByTypeAndLocation(sellerType, location, locationId: Long, offset: Int ?= 0, length: Int ?= 10)
+
+# Ad
+POST          /ad/submit                                            ir.bama.controllers.SellAdController.submit

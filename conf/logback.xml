@@ -1,0 +1,41 @@
+<configuration scan="true" scanPeriod="1 minute">
+
+    <conversionRule conversionWord="coloredLevel" converterClass="play.api.libs.logback.ColoredLevel"/>
+
+    <property name="APPLICATION_LEVEL" value="DEBUG"/>
+    <property name="STACK_TRACE_LEVEL_COUNT" value="15"/>
+    <property name="PATTERN" scope="context"
+              value="%-7([%level]) %date{yyyy-MM-dd' T 'HH:mm:ss.SSS} [%-26.26(%thread]) %-40.40(%logger{40}) %message %rootException{${STACK_TRACE_LEVEL_COUNT}}%n"/>
+
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+    <appender name="ASYNCSTDOUT" class="ch.qos.logback.classic.AsyncAppender">
+        <appender-ref ref="STDOUT"/>
+        <includeCallerData>true</includeCallerData>
+    </appender>
+
+    <logger name="ir.bama" level="${APPLICATION_LEVEL}">
+        <appender-ref ref="ASYNCSTDOUT"/>
+    </logger>
+
+    <!--<logger name="slick" level="${APPLICATION_LEVEL}">
+        <appender-ref ref="ASYNCSTDOUT"/>
+    </logger>
+    <logger name="slick.session" level="${APPLICATION_LEVEL}">
+        <appender-ref ref="ASYNCSTDOUT"/>
+    </logger>-->
+    <logger name="slick.jdbc.JdbcBackend.statement" level="${APPLICATION_LEVEL}">
+        <appender-ref ref="ASYNCSTDOUT"/>
+    </logger>
+
+    <!-- Off these ones as they are annoying, and anyway we manage configuration ourselves -->
+    <logger name="com.avaje.ebean.config.PropertyMapLoader" level="OFF"/>
+    <logger name="com.avaje.ebeaninternal.server.core.XmlConfigLoader" level="OFF"/>
+    <logger name="com.avaje.ebeaninternal.server.lib.BackgroundThread" level="OFF"/>
+    <logger name="com.gargoylesoftware.htmlunit.javascript" level="OFF"/>
+
+</configuration>
