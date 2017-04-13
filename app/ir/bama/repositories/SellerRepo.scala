@@ -154,8 +154,8 @@ class SellerRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, cityRepo: C
       case _ => DBIO.successful(None)
     }
 
-  def findIdByUserId(userId: Long): DBIO[Option[Long]] =
-    query.filter(_.userId === userId).map(_.id).result.headOption
+  def findIdAndTypeByUserId(userId: Long): DBIO[Option[(Long, SellerType)]] =
+    query.filter(_.userId === userId).map(s => (s.id, s.sellerType)).result.headOption
 
   def loadByUserId(userId: Long): DBIO[Option[Seller[_]]] =
     query.filter(_.userId === userId).map(s => (s, s.cityId)).result.headOption.flatMap {

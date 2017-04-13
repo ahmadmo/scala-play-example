@@ -42,7 +42,7 @@ class SellerController @Inject()(sellerService: SellerService, authController: A
                                 (implicit mat: Materializer, ec: ExecutionContext) extends Controller {
 
   private lazy val filesDir = Paths.get(configs.getString("app.dir.files").get)
-  private lazy val maxPhotoLength = configs.getBytes("controllers.seller.maxPhotoLength").get
+  private lazy val maxPhotoSize = configs.getBytes("controllers.seller.maxPhotoSize").get
 
   val privateSellerForm: Form[Boolean] = Form(single(
     "publicProfile" -> default(boolean, false)
@@ -96,14 +96,15 @@ class SellerController @Inject()(sellerService: SellerService, authController: A
           case (sellerData, dealerData) => sellerService.persist(sellerData.toDealer(dealerData)).saved
         }
       }
-      case Left(errors) => errors.asJson(Results.BadRequest).future
+      case Left(errors) => errors.asJsonError(Results.BadRequest).future
     }
   }
 
   def uploadPhoto: Action[Either[MaxSizeExceeded, MultipartFormData[Files.TemporaryFile]]] =
-    authController.authenticated.async(parse.maxLength(maxPhotoLength, parse.multipartFormData)) { request =>
+    authController.authenticated.async(parse.maxLength(maxPhotoSize, parse.multipartFormData)) { request =>
       request.body match {
-        case Left(_) => Map("maxLength" -> maxPhotoLength).asJson(Results.EntityTooLarge).future
+        case Left(_) =>
+          Err.request("Max size exceeded.", "maxSize" -> JsNumber(maxPhotoSize)).asJsonError(Results.EntityTooLarge).future
         case Right(data) => data.file("photo").map { photo =>
           photo.contentType.filter(_.startsWith("image/")).map { c =>
             if (c.endsWith("png")) ".png" else ".jpg"
@@ -115,8 +116,12 @@ class SellerController @Inject()(sellerService: SellerService, authController: A
               file.delete()
               Results.InternalServerError
             }
-          } getOrElse BadRequest("Image file expected").future
-        } getOrElse BadRequest("Missing File").future
+          }.getOrElse {
+            Err.request("Image file expected.", "parameter" -> JsString("photo")).asJsonError.future
+          }
+        }.getOrElse {
+          Err.request("Missing required parameter.", "parameter" -> JsString("photo")).asJsonError.future
+        }
       }
     }
 
@@ -150,7 +155,7 @@ class SellerController @Inject()(sellerService: SellerService, authController: A
       case _ => None
     }) match {
       case Some(t) => sellerService.listByType(t, offset ~ length).asJson
-      case _ => BadRequest("Invalid Seller Type").future
+      case _ => Err.request("Invalid seller type.").asJsonError.future
     }
   }
 
@@ -165,7 +170,7 @@ class SellerController @Inject()(sellerService: SellerService, authController: A
       case _ => None
     }) match {
       case Some(future) => future.asJson
-      case _ => BadRequest("Invalid Location").future
+      case _ => Err.request("Invalid location.").asJsonError.future
     }
   }
 
@@ -186,9 +191,9 @@ class SellerController @Inject()(sellerService: SellerService, authController: A
           case _ => None
         }) match {
           case Some(future) => future.asJson
-          case _ => BadRequest("Invalid Location").future
+          case _ => Err.request("Invalid location.").asJsonError.future
         }
-      case _ => BadRequest("Invalid Seller Type").future
+      case _ => Err.request("Invalid seller type.").asJsonError.future
     }
   }
 

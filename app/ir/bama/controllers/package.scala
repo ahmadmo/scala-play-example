@@ -32,20 +32,42 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 package object controllers {
 
+  // @formatter:off
+
   implicit val utf8: Codec = Codec.utf_8
   val json: String = ContentTypes.withCharset(ContentTypes.JSON)
 
   implicit val formErrorWrites: Writes[FormError] = Writes[FormError] { error =>
     error.args.foldLeft(Json.obj(
       "key" -> error.key,
-      "message" -> error.message /* TODO: get error message from messages api */
+      "message" -> error.message /* TODO: get error message from messages api */ ,
+      "category" -> "FormError"
     )) {
       case (js, (key: String, value: JsValue)) => js ++ Json.obj(key -> value)
       case (js, _) => js
     }
   }
 
-  // @formatter:off
+  case class Err(category: String, message: String, args: Seq[(String, JsValue)] = Nil) {
+    def this(category: String, message: String, arg: (String, JsValue)) = this(category, message, Seq(arg))
+  }
+
+  object Err {
+    def apply(category: String, message: String, arg: (String, JsValue)): Err = new Err(category, message, arg)
+    def request(message: String, args: Seq[(String, JsValue)] = Nil): Err = Err("RequestError", message, args)
+    def request(message: String, arg: (String, JsValue)): Err = Err("RequestError", message, arg)
+    def service(message: String, args: Seq[(String, JsValue)] = Nil): Err = Err("ServiceError", message, args)
+    def service(message: String, arg: (String, JsValue)): Err = Err("ServiceError", message, arg)
+  }
+
+  implicit val errWrites: Writes[Err] = Writes[Err] { error =>
+    error.args.foldLeft(Json.obj(
+      "message" -> error.message /* TODO: get error message from messages api */ ,
+      "category" -> error.category
+    )) {
+      case (js, (key, value)) => js ++ Json.obj(key -> value)
+    }
+  }
 
   implicit class FutureLike[A](val x: A) extends AnyVal {
     def future: Future[A] = Future.successful(x)
@@ -77,12 +99,32 @@ package object controllers {
     } getOrElse alternative
   }
 
+  implicit class ErrResultLike(val x: Err) extends AnyVal {
+    def asJsonError: Result = asJsonError(BadRequest)
+    def asJsonError(status: Status): Result = Seq(x).asJsonError(status)
+  }
+
+  implicit class ErrSeqResultLike(val xs: Seq[Err]) extends AnyVal {
+    def asJsonError: Result = asJsonError(BadRequest)
+    def asJsonError(status: Status): Result = Map("errors" -> xs).asJson(status)
+  }
+
+  implicit class FormErrorResultLike(val x: FormError) extends AnyVal {
+    def asJsonError: Result = asJsonError(BadRequest)
+    def asJsonError(status: Status): Result = Seq(x).asJsonError(status)
+  }
+
+  implicit class FormErrorSeqResultLike(val xs: Seq[FormError]) extends AnyVal {
+    def asJsonError: Result = asJsonError(BadRequest)
+    def asJsonError(status: Status): Result = Map("errors" -> xs).asJson(status)
+  }
+
   implicit class FutureResultLike[A](val f: Future[A]) extends AnyVal {
     def asJson(implicit tjs: Writes[A], ec: ExecutionContext): Future[Result] = asJson(Ok)
     def asJson(status: Status)(implicit tjs: Writes[A], ec: ExecutionContext): Future[Result] = f.map(_.asJson(status))
   }
 
-  implicit class MaybeFutureResultLike[A](val f: Future[Option[A]]) extends AnyVal {
+  implicit class FutureMaybeResultLike[A](val f: Future[Option[A]]) extends AnyVal {
     def asJson(implicit tjs: Writes[A], ec: ExecutionContext): Future[Result] = asJson(Ok)
     def asJson(status: Status)(implicit tjs: Writes[A], ec: ExecutionContext): Future[Result] = f.map(_.asJson(status))
   }
@@ -92,11 +134,31 @@ package object controllers {
     def saved(status: Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.saved(status))
   }
 
-  implicit class MaybeFutureSaveResultLike(val f: Future[Option[Long]]) extends AnyVal {
+  implicit class FutureMaybeSaveResultLike(val f: Future[Option[Long]]) extends AnyVal {
     def saved(implicit ec: ExecutionContext): Future[Result] = saved(Ok)
     def saved(status: Status)(implicit ec: ExecutionContext): Future[Result] = savedOrElse(status, InternalServerError)
     def savedOrElse(alternative: => Status)(implicit ec: ExecutionContext): Future[Result] = savedOrElse(Ok, alternative)
     def savedOrElse(status: Status, alternative: => Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.savedOrElse(status, alternative))
+  }
+
+  implicit class FutureErrResultLike(val f: Future[Err]) extends AnyVal {
+    def asJsonError(implicit ec: ExecutionContext): Future[Result] = asJsonError(BadRequest)
+    def asJsonError(status: Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.asJsonError(status))
+  }
+
+  implicit class FutureErrSeqResultLike(val f: Future[Seq[Err]]) extends AnyVal {
+    def asJsonError(implicit ec: ExecutionContext): Future[Result] = asJsonError(BadRequest)
+    def asJsonError(status: Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.asJsonError(status))
+  }
+
+  implicit class FutureFormErrorResultLike(val f: Future[FormError]) extends AnyVal {
+    def asJsonError(implicit ec: ExecutionContext): Future[Result] = asJsonError(BadRequest)
+    def asJsonError(status: Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.asJsonError(status))
+  }
+
+  implicit class FutureFormErrorSeqResultLike(val f: Future[Seq[FormError]]) extends AnyVal {
+    def asJsonError(implicit ec: ExecutionContext): Future[Result] = asJsonError(BadRequest)
+    def asJsonError(status: Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.asJsonError(status))
   }
 
   implicit class FormLike[A](val form: Form[A]) extends AnyVal {
@@ -104,7 +166,7 @@ package object controllers {
     def map(data: Map[String, Seq[String]])(block: (A) => Future[Result]): Future[Result] = fold(form.bindFromRequest(data), block)
     def map(block: (A) => Future[Result])(implicit r: Request[_]): Future[Result] = fold(form.bindFromRequest, block)
     private def fold(form: Form[A], block: (A) => Future[Result]) = form.fold(
-      formWithErrors => formWithErrors.errors.asJson(BadRequest).future,
+      formWithErrors => formWithErrors.errors.asJsonError(BadRequest).future,
       block.apply
     )
   }
@@ -118,9 +180,9 @@ package object controllers {
         lf.fold(formWithErrors => Left(formWithErrors.errors), Right(_)),
         rf.fold(formWithErrors => Left(formWithErrors.errors), Right(_))
       ) match {
-        case (Left(le), Left(re)) => (le ++ re).asJson(BadRequest).future
-        case (Left(le), Right(_)) => le.asJson(BadRequest).future
-        case (Right(_), Left(re)) => re.asJson(BadRequest).future
+        case (Left(le), Left(re)) => (le ++ re).asJsonError(BadRequest).future
+        case (Left(le), Right(_)) => le.asJsonError(BadRequest).future
+        case (Right(_), Left(re)) => re.asJsonError(BadRequest).future
         case (Right(a), Right(b)) => block(a, b)
       }
     }

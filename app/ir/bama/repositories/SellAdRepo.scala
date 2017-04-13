@@ -302,6 +302,9 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
       case _ => DBIO.successful(None)
     }
 
+  def countAds(sellerId: Long, fromDate: Date, toDate: Date): DBIO[Int] =
+    query.filter(ad => ad.sellerId === sellerId && ad.lastSubmissionDate.between(fromDate, toDate)).length.result
+
   override def list(range: Option[Range]): DBIO[Seq[SellAd]] = listByQuery(query, range)
 
   def listBySellerId(sellerId: Long, range: Option[Range]): DBIO[Seq[SellAd]] =

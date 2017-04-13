@@ -39,23 +39,23 @@ abstract class Seller[T](val `type`: SellerType)
   private final val cityLens = lens[T] >> 'city
   private final val phoneNumbersLens = lens[T] >> 'phoneNumbers
 
-  def user: Option[User]
+  val user: Option[User]
 
   final def withUser(user: User): T = userLens.modify(self)(_ => Some(user))
 
-  def name: String
+  val name: String
 
-  def registrationDate: Date
+  val registrationDate: Date
 
-  def city: Option[City]
+  val city: Option[City]
 
   final def withCity(city: City): T = cityLens.modify(self)(_ => Some(city))
 
-  def address: String
+  val address: String
 
-  def photo: Option[String]
+  val photo: Option[String]
 
-  def phoneNumbers: Option[Seq[String]]
+  val phoneNumbers: Option[Seq[String]]
 
   final def withPhoneNumbers(numbers: Seq[String]): T = phoneNumbersLens.modify(self)(_ => Some(numbers))
 

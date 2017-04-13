@@ -34,8 +34,8 @@ class SellerService @Inject()(sellerRepo: SellerRepo, userRepo: UserRepo)
 
   import sellerRepo.dbConfig._
 
-  def findIdByUserId(userId: Long): Future[Option[Long]] =
-    db.run(sellerRepo.findIdByUserId(userId))
+  def findIdAndTypeByUserId(userId: Long): Future[Option[(Long, SellerType)]] =
+    db.run(sellerRepo.findIdAndTypeByUserId(userId))
 
   def loadByUserId(userId: Long): Future[Option[Seller[_]]] =
     db.run(sellerRepo.loadByUserId(userId))

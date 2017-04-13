@@ -37,7 +37,7 @@ import play.api.data.Forms._
 import play.api.data.format.Formatter
 import play.api.data.{Form, FormError, Mapping}
 import play.api.libs.Files
-import play.api.libs.json.{JsNumber, Json}
+import play.api.libs.json.{JsNumber, JsString, Json}
 import play.api.mvc._
 
 import scala.collection.mutable
@@ -52,7 +52,11 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
 
   private lazy val filesDir = Paths.get(configs.getString("app.dir.files").get)
   private lazy val maxPhotos = configs.getInt("controllers.ad.maxPhotos").get
-  private lazy val maxPhotoLength = configs.getBytes("controllers.ad.maxPhotoLength").get
+  private lazy val maxPhotoSize = configs.getBytes("controllers.ad.maxPhotoSize").get
+  private lazy val adsPerDay = Map(
+    SellerType.PRIVATE -> configs.getInt("controllers.ad.adsPerDay.private").get,
+    SellerType.DEALER -> configs.getInt("controllers.ad.adsPerDay.dealer").get
+  )
 
   sealed trait PaymentData {
     def toPayment: Payment
@@ -130,14 +134,17 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
   val paymentTypeFormatter: RichFormatter[PaymentType] = Formats.enumFormat(PaymentType)
 
   def submit: Action[Either[MaxSizeExceeded, MultipartFormData[Files.TemporaryFile]]] =
-    authController.authenticated.async(parse.maxLength(maxPhotos * maxPhotoLength, parse.multipartFormData)) { implicit request =>
+    authController.authenticated.async(parse.maxLength(maxPhotos * maxPhotoSize, parse.multipartFormData)) { implicit request =>
       request.body match {
-        case Left(_) => Map("maxLength" -> maxPhotos * maxPhotoLength).asJson(Results.EntityTooLarge).future
+        case Left(_) =>
+          Err.request("Max size exceeded.", "maxSize" -> JsNumber(maxPhotos * maxPhotoSize))
+            .asJsonError(Results.EntityTooLarge).future
         case Right(data: MultipartFormData[Files.TemporaryFile]) =>
           if (data.files.size > maxPhotos) {
-            Map("maxPhotos" -> maxPhotos).asJson(Results.BadRequest).future
+            Err.request(s"Only $maxPhotos photos allowed.").asJsonError.future
           } else data.asFormUrlEncoded.get("data").filter(_.nonEmpty).map(_.head).map(Json.parse).map { json =>
             paymentTypeFormatter.bind("payment.type", (json \ "payment" \ "type").asOpt[String]) match {
+              case Left(errors) => errors.asJsonError(Results.BadRequest).future
               case Right(paymentType) =>
                 val paymentMapping = paymentType match {
                   case PaymentType.CREDIT => creditPaymentMapping
@@ -145,19 +152,27 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
                 }
                 sellAdForm(paymentMapping).map(json) { adData =>
                   handleFiles(data.files) match {
+                    case Left(errors) => errors.asJsonError(Results.BadRequest).future
                     case Right(files) =>
                       val ad = adData.toSellAd
                       val names = files.map(_._1)
-                      adService.persist(request.login.userId, ad.copy(car = ad.car.copy(photos = Some(names)))).savedOrElse {
-                        files.foreach(_._2.delete())
-                        Results.InternalServerError
+                      adService.persist(request.login.userId, ad.copy(car = ad.car.copy(photos = Some(names))), adsPerDay).map {
+                        case Some(insertResult) => insertResult match {
+                          case Left(errorMessage) =>
+                            files.foreach(_._2.delete())
+                            Err.service(errorMessage).asJsonError(Results.BadRequest)
+                          case Right(adId) => adId.saved
+                        }
+                        case _ =>
+                          files.foreach(_._2.delete())
+                          Results.NotFound
                       }
-                    case Left(errors) => errors.asJson(Results.BadRequest).future
                   }
                 }
-              case Left(errors) => errors.asJson(Results.BadRequest).future
             }
-          } getOrElse BadRequest("Missing parameter: data").future
+          }.getOrElse {
+            Err.request("Missing required parameter.", Seq("parameter" -> JsString("data"))).asJsonError.future
+          }
       }
     }
 
@@ -165,10 +180,10 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
     val errors = files.foldLeft(mutable.ListBuffer.empty[FormError]) {
       case (buf, file) =>
         if (!file.contentType.exists(_.startsWith("image/"))) {
-          buf += FormError(file.key, "Image file expected")
+          buf += FormError(file.key, "Image file expected.")
         }
-        if (file.ref.file.length() > maxPhotoLength) {
-          buf += FormError(file.key, "Max length exceeded", Seq("maxLength" -> JsNumber(maxPhotoLength)))
+        if (file.ref.file.length() > maxPhotoSize) {
+          buf += FormError(file.key, "Max size exceeded.", Seq("maxLength" -> JsNumber(maxPhotoSize)))
         }
         buf
     }
