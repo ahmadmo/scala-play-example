@@ -40,7 +40,7 @@ package object controllers {
   implicit val formErrorWrites: Writes[FormError] = Writes[FormError] { error =>
     error.args.foldLeft(Json.obj(
       "key" -> error.key,
-      "message" -> error.message /* TODO: get error message from messages api */ ,
+      "message" -> error.message, // TODO: get error message from messages api
       "category" -> "FormError"
     )) {
       case (js, (key: String, value: JsValue)) => js ++ Json.obj(key -> value)
@@ -62,7 +62,7 @@ package object controllers {
 
   implicit val errWrites: Writes[Err] = Writes[Err] { error =>
     error.args.foldLeft(Json.obj(
-      "message" -> error.message /* TODO: get error message from messages api */ ,
+      "message" -> error.message, // TODO: get error message from messages api
       "category" -> error.category
     )) {
       case (js, (key, value)) => js ++ Json.obj(key -> value)
