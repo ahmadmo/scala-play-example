@@ -44,3 +44,5 @@ GET           /seller/list/:sellerType/:location/:locationId        ir.bama.cont
 # Ad
 POST          /ad/submit                                            ir.bama.controllers.SellAdController.submit
 GET           /ad/info/:id                                          ir.bama.controllers.SellAdController.load(id: Long)
+GET           /ad/list                                              ir.bama.controllers.SellAdController.list(offset: Int ?= 0, length: Int ?= 10)
+GET           /ad/list/:sellerId                                    ir.bama.controllers.SellAdController.listBySellerId(sellerId: Long, offset: Int ?= 0, length: Int ?= 10)

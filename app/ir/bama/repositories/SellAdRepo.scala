@@ -228,11 +228,12 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
   }
 
   private val toPayment: PaymentRow => Payment = {
-    case row@(paymentType, _, finalPrice, maybePeriod, maybeTicks, maybePayments, maybeAmount) =>
+    case row@(paymentType, initialPrice, finalPrice, maybePeriod, maybeTicks, maybePayments, maybeAmount) =>
       paymentType match {
         case PaymentType.CREDIT => CreditPayment(finalPrice)
         case PaymentType.INSTALLMENT => (maybePeriod, maybeTicks, maybePayments, maybeAmount) match {
-          case (Some(period), Some(ticks), Some(payments), Some(amount)) => InstallmentPayment(None, period, ticks, payments, amount)
+          case (Some(period), Some(ticks), Some(payments), Some(amount)) =>
+            InstallmentPayment(initialPrice, finalPrice, period, ticks, payments, amount)
           case _ => throw new IllegalStateException(s"Invalid row: $row")
         }
         case _ => throw new IllegalStateException(s"Invalid row: $row")
@@ -301,24 +302,18 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
     }
   }
 
-  override def load(id: Rep[Long]): DBIO[Option[SellAd]] =
-    (for {
-      ad: SellAdTable <- query if ad.id === id
-      ss: StatsTable <- stats if ss.adId === ad.id
-    } yield (ad, ad.cityId, ad.modelId, ss)).result.headOption.flatMap {
-      case Some(row) => refineAd(Right(row)).flatMap(joinExtraInfo(_, fullInfo = true)).map(Some(_))
-      case _ => DBIO.successful(None)
-    }
-
-  def load(adId: Long, maybeSellerId: Option[Long]): DBIO[Option[(SellAd, Boolean)]] =
-    (maybeSellerId match {
+  def load(adId: Long, maybeSellerId: Option[Long]): DBIO[Option[(SellAd, Boolean)]] = {
+    val singleQuery = maybeSellerId match {
       case Some(sellerId) => query.filter { ad =>
         ad.id === adId && (ad.sellerId === sellerId || ad.adStatus.inSet(Seq(SellAdStatus.SUBMITTED, SellAdStatus.RESUBMITTED)))
       }
       case _ => query.filter { ad =>
         ad.id === adId && ad.adStatus.inSet(Seq(SellAdStatus.SUBMITTED, SellAdStatus.RESUBMITTED))
       }
-    }).map(ad => (ad, ad.sellerId, ad.cityId, ad.modelId)).result.headOption.flatMap {
+    }
+    singleQuery.map { ad =>
+      (ad, ad.sellerId, ad.cityId, ad.modelId)
+    }.result.headOption.flatMap {
       case Some((ad, sellerId, cityId, modelId)) =>
         val owner = maybeSellerId.contains(sellerId)
         val qSeller = sellerRepo.load(sellerId, filterPublic = false)
@@ -353,73 +348,66 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
         }.map(refinedAd => Some(refinedAd, owner))
       case _ => DBIO.successful(None)
     }
-
-  def countAds(sellerId: Long, fromDate: Date, toDate: Date): DBIO[Int] =
-    query.filter(ad => ad.sellerId === sellerId && ad.lastSubmissionDate.between(fromDate, toDate)).length.result
-
-  override def list(range: Option[Range]): DBIO[Seq[SellAd]] = listByQuery(query, range)
-
-  def listBySellerId(sellerId: Long, range: Option[Range]): DBIO[Seq[SellAd]] =
-    listByQuery(query.filter(_.sellerId === sellerId), range, withStats = true)
-
-  private def listByQuery(query: Query[SellAdTable, SellAd, Seq], range: Option[Range],
-                          sortBy: (SellAdTable) => ColumnOrdered[_] = _.lastSubmissionDate.desc,
-                          withStats: Boolean = false) = {
-    val q = pagedQuery[SellAdTable](query.sortBy(sortBy), range)
-    (if (withStats) listWithStats(q) else listWithoutStats(q)).flatMap { rows =>
-      DBIO.sequence(rows.map(joinExtraInfo(_)))
-    }.withPinnedSession
   }
 
-  private def listWithStats(query: Query[SellAdTable, SellAd, Seq]) =
-    (for {
-      ad: SellAdTable <- query
-      ss: StatsTable <- stats if ss.adId === ad.id
-    } yield (ad, ad.cityId, ad.modelId, ss)).result.flatMap { rows =>
-      DBIO.sequence(rows.map(row => refineAd(Right(row))))
-    }
+  def countAds(sellerId: Long, fromDate: Date, toDate: Date): DBIO[Int] =
+    query.filter { ad =>
+      ad.sellerId === sellerId && ad.lastSubmissionDate.between(fromDate, toDate)
+    }.length.result
 
-  private def listWithoutStats(query: Query[SellAdTable, SellAd, Seq]) =
-    query.map(ad => (ad, ad.cityId, ad.modelId)).result.flatMap { rows =>
-      DBIO.sequence(rows.map(row => refineAd(Left(row))))
-    }
+  def list(maybeSellerId: Option[Long], range: Option[Range]): DBIO[Seq[(SellAd, Boolean)]] =
+    listByQuery(query, maybeSellerId, range)
 
-  private def refineAd(row: Either[(SellAd, Long, Long), (SellAd, Long, Long, SellAdStats)]) =
-    (row match {
-      case Left((ad, cityId, modelId)) => (ad, cityId, modelId, None)
-      case Right((ad, cityId, modelId, ss)) => (ad, cityId, modelId, Some(ss))
-    }) match {
-      case (ad, cityId, modelId, maybeStats) =>
-        (cityRepo.load(cityId) zip modelRepo.load(modelId)).map {
-          case (someCity@Some(_), someModel@Some(_)) =>
-            ad.copy(city = someCity, car = ad.car.copy(model = someModel), stats = maybeStats)
-          case _ => throw new IllegalStateException
-        }
-      case _ => throw new IllegalStateException
-    }
+  def listBySellerId(sellerId: Long, maybeSellerId: Option[Long], range: Option[Range]): DBIO[Seq[(SellAd, Boolean)]] =
+    listByQuery(query.filter(_.sellerId === sellerId), maybeSellerId, range)
 
-  private def joinExtraInfo(ad: SellAd, fullInfo: Boolean = false): DBIO[SellAd] = {
-    val id = ad.id.get
-    val q = carPhotosAction(id, if (fullInfo) None else 0 ~ 1)
-    if (!fullInfo) q.map { names =>
-      ad.copy(car = ad.car.copy(photos = Some(names)))
-    } else ad.payment match {
-      case _: CreditPayment =>
-        q.zip(submissionDatesAction(id)).map {
-          case (names, dates) =>
-            ad.copy(car = ad.car.copy(photos = Some(names)), submissionDates = Some(dates))
+  private def listByQuery(query: Query[SellAdTable, SellAd, Seq], maybeSellerId: Option[Long], range: Option[Range],
+                          sortByFields: Seq[(SellAdTable) => ColumnOrdered[_]] = Seq(_.lastSubmissionDate desc, _.id asc)) = {
+    val listQuery = sortByFields.foldLeft {
+      maybeSellerId match {
+        case Some(sellerId) => query.filter { ad =>
+          ad.sellerId === sellerId || ad.adStatus.inSet(Seq(SellAdStatus.SUBMITTED, SellAdStatus.RESUBMITTED))
         }
-      case x: InstallmentPayment =>
-        q.zip(submissionDatesAction(id)).zip(prePaidsAction(id)).map {
-          case ((names, dates), prePaidAmounts) =>
-            ad.copy(car = ad.car.copy(photos = Some(names)), submissionDates = Some(dates), payment = x.copy(prePaids = Some(prePaidAmounts)))
+        case _ => query.filter { ad =>
+          ad.adStatus.inSet(Seq(SellAdStatus.SUBMITTED, SellAdStatus.RESUBMITTED))
         }
-      case _ => throw new IllegalStateException
+      }
+    } {
+      case (q, f) => q.sortBy(f)
+    }
+    pagedQuery[SellAdTable](listQuery, range).map { ad =>
+      (ad, ad.sellerId, ad.cityId, ad.modelId)
+    }.result.flatMap { rows =>
+      DBIO.sequence {
+        rows.map {
+          case (ad, sellerId, cityId, modelId) =>
+            val adId = ad.id.get
+            val owner = maybeSellerId.contains(sellerId)
+            val qCity = cityRepo.load(cityId)
+            val qCarModel = modelRepo.load(modelId)
+            val qCarPhotos = carPhotosAction(adId, 0 ~ 1)
+            val joinQuery = qCity zip qCarModel zip qCarPhotos
+            (if (owner) {
+              val qStats = stats.filter(_.adId === adId).result.headOption
+              (joinQuery zip qStats).map {
+                case (((someCity@Some(_), someModel@Some(_)), names), someStats@Some(_)) =>
+                  ad.copy(
+                    city = someCity, stats = someStats,
+                    car = ad.car.copy(model = someModel, photos = Some(names)))
+                case _ => throw new IllegalStateException
+              }
+            } else joinQuery.map {
+              case ((someCity@Some(_), someModel@Some(_)), names) =>
+                ad.copy(city = someCity, car = ad.car.copy(model = someModel, photos = Some(names)))
+              case _ => throw new IllegalStateException
+            }).map(refinedAd => (refinedAd, owner))
+        }
+      }
     }
   }
 
   private def submissionDatesAction(adId: Long) =
-    submissionDates.filter(_.adId === adId).map(_.when).result
+    submissionDates.filter(_.adId === adId).sortBy(d => (d.when asc, d.adId asc)).map(_.when).result
 
   private def carPhotosAction(adId: Long, range: Option[Range]) =
     pagedQuery[CarPhotoTable](carPhotos.filter(_.adId === adId).sortBy(_.order asc), range).map(_.photo).result

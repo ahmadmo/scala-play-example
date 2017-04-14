@@ -101,25 +101,39 @@ class SellAdService @Inject()(adRepo: SellAdRepo, sellerService: SellerService, 
   }
 
   def load(adId: Long, maybeUserId: Option[Long]): Future[Option[(SellAd, Boolean)]] = db.run {
-    (maybeUserId match {
-      case Some(userId) => sellerService.repo.findIdByUserId(userId).flatMap { maybeSellerId =>
-        adRepo.load(adId, maybeSellerId)
-      }
-      case _ => adRepo.load(adId, None)
-    }).map {
+    findSellerId(maybeUserId) { maybeSellerId =>
+      adRepo.load(adId, maybeSellerId)
+    }.map {
       _.flatMap {
         case result@(ad, owner) =>
           ad.seller.map {
-            case x: PrivateSeller => if (x.publicProfile || owner) result else {
-              (ad.copy(seller = Some(Seller.phoneNumbers(x.phoneNumbers))), owner)
-            }
+            case x: PrivateSeller =>
+              if (x.publicProfile || owner) result else {
+                val maybeSeller: Option[Seller[_]] = if (ad.phoneNumber.isEmpty) Some(Seller.phoneNumbers(x.phoneNumbers)) else None
+                (ad.copy(seller = maybeSeller), owner)
+              }
             case _: Dealer => result
           }
       }
     }
   }
 
-  def listBySellerId(sellerId: Long, range: Option[Range]): Future[Seq[SellAd]] =
-    db.run(adRepo.listBySellerId(sellerId, range))
+  def list(maybeUserId: Option[Long], range: Option[Range]): Future[Seq[(SellAd, Boolean)]] = db.run {
+    findSellerId(maybeUserId) { maybeSellerId =>
+      adRepo.list(maybeSellerId, range)
+    }
+  }
+
+  def listBySellerId(sellerId: Long, maybeUserId: Option[Long], range: Option[Range]): Future[Seq[(SellAd, Boolean)]] = db.run {
+    findSellerId(maybeUserId) { maybeSellerId =>
+      adRepo.listBySellerId(sellerId, maybeSellerId, range)
+    }
+  }
+
+  private def findSellerId[A](maybeUserId: Option[Long])(block: (Option[Long]) => DBIO[A]) =
+    maybeUserId match {
+      case Some(userId) => sellerService.repo.findIdByUserId(userId).flatMap(block)
+      case _ => block(None)
+    }
 
 }

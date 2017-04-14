@@ -32,12 +32,13 @@ import ir.bama.models.PaymentPeriod.PaymentPeriod
 import ir.bama.models.PaymentType.PaymentType
 import ir.bama.models.{PaymentType, _}
 import ir.bama.services.SellAdService
+import ir.bama.utils.RangeLike
 import play.api.Configuration
 import play.api.data.Forms._
 import play.api.data.format.Formatter
 import play.api.data.{Form, FormError, Mapping}
 import play.api.libs.Files
-import play.api.libs.json.{JsBoolean, JsNumber, JsString, Json}
+import play.api.libs.json._
 import play.api.mvc._
 
 import scala.collection.mutable
@@ -198,14 +199,20 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
     }
   }
 
-  case class SellerView()
-
   def load(id: Long): Action[AnyContent] = authController.maybeAuthenticated.async { request =>
-    adService.load(id, request.login.map(_.userId)).map {
-      _.map {
-        case (ad, owner) => Map("ad" -> Json.toJson(ad), "owner" -> JsBoolean(owner))
-      }
-    }.asJson
+    adService.load(id, request.login.map(_.userId)).map(_.map(refineResult)).asJson
+  }
+
+  def list(offset: Int, length: Int): Action[AnyContent] = authController.maybeAuthenticated.async { request =>
+    adService.list(request.login.map(_.userId), offset ~ length).map(_.map(refineResult)).asJson
+  }
+
+  def listBySellerId(sellerId: Long, offset: Int, length: Int): Action[AnyContent] = authController.maybeAuthenticated.async { request =>
+    adService.listBySellerId(sellerId, request.login.map(_.userId), offset ~ length).map(_.map(refineResult)).asJson
+  }
+
+  private val refineResult: ((SellAd, Boolean)) => Map[String, JsValue] = {
+    case (ad, owner) => Map("ad" -> Json.toJson(ad), "owner" -> JsBoolean(owner))
   }
 
 }

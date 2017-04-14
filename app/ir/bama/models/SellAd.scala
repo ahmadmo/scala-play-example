@@ -45,11 +45,8 @@ object SellAd {
 }
 
 abstract class Payment(val `type`: PaymentType) {
-
-  def initialPrice: Long
-
-  def finalPrice: Long
-
+  val initialPrice: Long
+  val finalPrice: Long
 }
 
 object Payment {
@@ -67,8 +64,11 @@ object Payment {
 
   private val writes: Writes[Payment] = Writes[Payment] { o =>
     (o match {
-      case x: CreditPayment => Json.toJson(x)(CreditPayment.format)
-      case x: InstallmentPayment => Json.toJson(x)(InstallmentPayment.format)
+      case x: CreditPayment => Json.toJson(x)(CreditPayment.format).as[JsObject] + ("initialPrice" -> JsNumber(x.initialPrice))
+      case x: InstallmentPayment => Json.toJson(x)(InstallmentPayment.format).as[JsObject] ++ Json.obj(
+        "initialPrice" -> JsNumber(x.initialPrice),
+        "finalPrice" -> JsNumber(x.finalPrice)
+      )
     }).as[JsObject] + ("type" -> Json.toJson(o.`type`))
   }
 
@@ -104,7 +104,7 @@ object PaymentPeriod extends Enumeration {
 }
 
 case class CreditPayment(finalPrice: Long) extends Payment(PaymentType.CREDIT) {
-  override def initialPrice: Long = finalPrice
+  override val initialPrice: Long = finalPrice
 }
 
 object CreditPayment {
@@ -121,7 +121,16 @@ case class InstallmentPayment(prePaids: Option[Seq[Long]], period: PaymentPeriod
 }
 
 object InstallmentPayment {
+
   implicit val format: OFormat[InstallmentPayment] = Json.format[InstallmentPayment]
+
+  def apply(ip: Long, fp: Long, period: PaymentPeriod, ticks: Int,
+            numberOfPayments: Int, amountPerPayment: Long): InstallmentPayment =
+    new InstallmentPayment(None, period, ticks, numberOfPayments, amountPerPayment) {
+      override lazy val initialPrice: Long = ip
+      override lazy val finalPrice: Long = fp
+    }
+
 }
 
 object SellAdStatus extends Enumeration {
