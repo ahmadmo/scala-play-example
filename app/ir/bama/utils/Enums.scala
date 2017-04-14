@@ -35,7 +35,9 @@ object Enums {
 
   def enumReads[E <: Enumeration](enum: E): Reads[E#Value] = Reads[E#Value](fromJs(_)(enum).fold(JsError(_), JsSuccess(_)))
 
-  def enumWrites[E <: Enumeration]: Writes[E#Value] = Writes[E#Value](v => JsString(v.toString))
+  def enumWrites[E <: Enumeration]: Writes[E#Value] = Writes[E#Value] { v =>
+    if (v == null) JsNull else JsString(v.toString)
+  }
 
   def enumFormat[E <: Enumeration](enum: E): Format[E#Value] = Format(enumReads(enum), enumWrites)
 

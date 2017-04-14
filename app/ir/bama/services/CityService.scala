@@ -28,7 +28,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * @author ahmad
   */
 @Singleton
-class CityService @Inject()(cityRepo: CityRepo)(implicit ec: ExecutionContext) extends BaseService[City](cityRepo) {
+class CityService @Inject()(cityRepo: CityRepo)(implicit ec: ExecutionContext) extends BaseService[City, CityRepo](cityRepo) {
 
   import cityRepo.dbConfig._
 

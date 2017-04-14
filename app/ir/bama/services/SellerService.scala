@@ -20,7 +20,7 @@ import javax.inject.{Inject, Singleton}
 
 import ir.bama.models.Seller
 import ir.bama.models.SellerType.SellerType
-import ir.bama.repositories.{SellerRepo, UserRepo}
+import ir.bama.repositories.SellerRepo
 import ir.bama.utils.Range
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -29,10 +29,13 @@ import scala.concurrent.{ExecutionContext, Future}
   * @author ahmad
   */
 @Singleton
-class SellerService @Inject()(sellerRepo: SellerRepo, userRepo: UserRepo)
-                             (implicit ec: ExecutionContext) extends BaseService[Seller[_]](sellerRepo) {
+class SellerService @Inject()(sellerRepo: SellerRepo)(implicit ec: ExecutionContext) extends BaseService[Seller[_], SellerRepo](sellerRepo) {
 
   import sellerRepo.dbConfig._
+  import profile.api._
+
+  def load(id: Long, filterPublic: Boolean): Future[Option[Seller[_]]] =
+    db.run(sellerRepo.load(id, filterPublic))
 
   def findIdAndTypeByUserId(userId: Long): Future[Option[(Long, SellerType)]] =
     db.run(sellerRepo.findIdAndTypeByUserId(userId))

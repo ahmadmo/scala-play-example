@@ -28,7 +28,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * @author ahmad
   */
 @Singleton
-class CarModelService @Inject()(modelRepo: CarModelRepo)(implicit ec: ExecutionContext) extends BaseService[CarModel](modelRepo) {
+class CarModelService @Inject()(modelRepo: CarModelRepo)(implicit ec: ExecutionContext) extends BaseService[CarModel, CarModelRepo](modelRepo) {
 
   import modelRepo.dbConfig._
 

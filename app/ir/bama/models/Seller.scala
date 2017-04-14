@@ -63,7 +63,11 @@ abstract class Seller[T](val `type`: SellerType)
 
 object Seller {
 
-  def id(id: Long): Seller[_] = PrivateSeller(Some(id), null, null, null, null, null, null, null, publicProfile = false)
+  def id(id: Long): Seller[_] =
+    PrivateSeller(Some(id), None, null, null, None, null, None, None, publicProfile = false)
+
+  def phoneNumbers(numbers: Option[Seq[String]]): Seller[_] =
+    PrivateSeller(None, None, null, null, None, null, None, numbers, publicProfile = false)
 
   private val reads: Reads[Seller[_]] = Reads[Seller[_]] {
     case o: JsObject =>

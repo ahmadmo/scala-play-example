@@ -30,7 +30,7 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 @Singleton
 class UserService @Inject()(userRepo: UserRepo, userLoginRepo: UserLoginRepo)
-                           (implicit ec: ExecutionContext) extends BaseService[User](userRepo) {
+                           (implicit ec: ExecutionContext) extends BaseService[User, UserRepo](userRepo) {
 
   import userRepo.dbConfig._
   import profile.api._

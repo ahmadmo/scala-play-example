@@ -25,7 +25,7 @@ import scala.concurrent.{ExecutionContext, Future}
 /**
   * @author ahmad
   */
-abstract class BaseService[Entity](repo: BaseRepo[Entity])(implicit ec: ExecutionContext) {
+abstract class BaseService[Entity, Repo <: BaseRepo[Entity]](val repo: Repo)(implicit ec: ExecutionContext) {
 
   protected val logger = Logger(getClass)
 

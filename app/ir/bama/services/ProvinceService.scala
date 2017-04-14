@@ -27,4 +27,4 @@ import scala.concurrent.ExecutionContext
   * @author ahmad
   */
 @Singleton
-class ProvinceService @Inject()(provinceRepo: ProvinceRepo)(implicit ec: ExecutionContext) extends BaseService[Province](provinceRepo)
+class ProvinceService @Inject()(provinceRepo: ProvinceRepo)(implicit ec: ExecutionContext) extends BaseService[Province, ProvinceRepo](provinceRepo)

@@ -41,7 +41,9 @@ object Dates {
   }
 
   val dateReads: Reads[Date] = Reads[Date](fromJs(_).fold(JsError(_), JsSuccess(_)))
-  val dateWrites: Writes[Date] = Writes[Date](v => JsString(format.format(v)))
+  val dateWrites: Writes[Date] = Writes[Date] { v =>
+    if (v == null) JsNull else JsString(format.format(v))
+  }
   val dateFormat: Format[Date] = Format(dateReads, dateWrites)
 
 }

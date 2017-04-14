@@ -29,7 +29,7 @@ import ir.bama.models.PaymentPeriod.PaymentPeriod
 import ir.bama.models.PaymentType.PaymentType
 import ir.bama.models.SellAdStatus.SellAdStatus
 import ir.bama.models._
-import ir.bama.utils.Range
+import ir.bama.utils.{Range, RangeLike}
 import play.api.db.slick.DatabaseConfigProvider
 import shapeless.syntax.std.tuple._
 import slick.lifted.{ColumnOrdered, ForeignKeyQuery, PrimaryKey, ProvenShape}
@@ -276,7 +276,15 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
 
   override def persist(ad: SellAd): DBIO[Long] = {
     val insertAd = super.persist(ad).flatMap { adId =>
-      (stats += SellAdStats(adId, 0, 0)).map(_ => adId)
+      val insertStats = stats += SellAdStats(adId, 0, 0)
+      val insertDates = submissionDates += (adId, ad.lastSubmissionDate)
+      val insertCarPhotos = carPhotos ++= (ad.car.photos match {
+        case Some(names) => names.zipWithIndex.map {
+          case (name, idx) => (adId, idx, name)
+        }
+        case _ => Seq.empty
+      })
+      (insertStats zip insertDates zip insertCarPhotos).map(_ => adId)
     }
     ad.payment match {
       case _: CreditPayment => insertAd.transactionally
@@ -299,6 +307,50 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
       ss: StatsTable <- stats if ss.adId === ad.id
     } yield (ad, ad.cityId, ad.modelId, ss)).result.headOption.flatMap {
       case Some(row) => refineAd(Right(row)).flatMap(joinExtraInfo(_, fullInfo = true)).map(Some(_))
+      case _ => DBIO.successful(None)
+    }
+
+  def load(adId: Long, maybeSellerId: Option[Long]): DBIO[Option[(SellAd, Boolean)]] =
+    (maybeSellerId match {
+      case Some(sellerId) => query.filter { ad =>
+        ad.id === adId && (ad.sellerId === sellerId || ad.adStatus.inSet(Seq(SellAdStatus.SUBMITTED, SellAdStatus.RESUBMITTED)))
+      }
+      case _ => query.filter { ad =>
+        ad.id === adId && ad.adStatus.inSet(Seq(SellAdStatus.SUBMITTED, SellAdStatus.RESUBMITTED))
+      }
+    }).map(ad => (ad, ad.sellerId, ad.cityId, ad.modelId)).result.headOption.flatMap {
+      case Some((ad, sellerId, cityId, modelId)) =>
+        val owner = maybeSellerId.contains(sellerId)
+        val qSeller = sellerRepo.load(sellerId, filterPublic = false)
+        val qCity = cityRepo.load(cityId)
+        val qCarModel = modelRepo.load(modelId)
+        val qCarPhotos = carPhotosAction(adId, None)
+        val joinQuery = (qSeller zip qCity) zip (qCarModel zip qCarPhotos)
+        (if (owner) {
+          val qStats = stats.filter(_.adId === adId).result.headOption
+          val qDates = submissionDatesAction(adId)
+          joinQuery.zip(qStats zip qDates).map {
+            case (((someSeller@Some(_), someCity@Some(_)), (someModel@Some(_), names)), (someStats@Some(_), dates)) =>
+              ad.copy(
+                seller = someSeller, city = someCity, stats = someStats,
+                car = ad.car.copy(model = someModel, photos = Some(names)),
+                submissionDates = Some(dates))
+            case _ => throw new IllegalStateException
+          }
+        } else joinQuery.map {
+          case ((someSeller@Some(_), someCity@Some(_)), (someModel@Some(_), names)) =>
+            ad.copy(
+              seller = someSeller, city = someCity,
+              car = ad.car.copy(model = someModel, photos = Some(names)))
+          case _ => throw new IllegalStateException
+        }).flatMap { refinedAd =>
+          ad.payment match {
+            case _: CreditPayment => DBIO.successful(refinedAd)
+            case x: InstallmentPayment => prePaidsAction(adId).map { prePaidAmounts =>
+              refinedAd.copy(payment = x.copy(prePaids = Some(prePaidAmounts)))
+            }
+          }
+        }.map(refinedAd => Some(refinedAd, owner))
       case _ => DBIO.successful(None)
     }
 
@@ -348,7 +400,7 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
 
   private def joinExtraInfo(ad: SellAd, fullInfo: Boolean = false): DBIO[SellAd] = {
     val id = ad.id.get
-    val q = carPhotosAction(id, if (fullInfo) None else Some(Range(0, 1)))
+    val q = carPhotosAction(id, if (fullInfo) None else 0 ~ 1)
     if (!fullInfo) q.map { names =>
       ad.copy(car = ad.car.copy(photos = Some(names)))
     } else ad.payment match {

@@ -37,7 +37,7 @@ import play.api.data.Forms._
 import play.api.data.format.Formatter
 import play.api.data.{Form, FormError, Mapping}
 import play.api.libs.Files
-import play.api.libs.json.{JsNumber, JsString, Json}
+import play.api.libs.json.{JsBoolean, JsNumber, JsString, Json}
 import play.api.mvc._
 
 import scala.collection.mutable
@@ -196,6 +196,16 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
     } else Left {
       errors
     }
+  }
+
+  case class SellerView()
+
+  def load(id: Long): Action[AnyContent] = authController.maybeAuthenticated.async { request =>
+    adService.load(id, request.login.map(_.userId)).map {
+      _.map {
+        case (ad, owner) => Map("ad" -> Json.toJson(ad), "owner" -> JsBoolean(owner))
+      }
+    }.asJson
   }
 
 }

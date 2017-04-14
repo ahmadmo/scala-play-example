@@ -149,10 +149,21 @@ class SellerRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, cityRepo: C
   }
 
   override def load(id: Rep[Long]): DBIO[Option[Seller[_]]] =
-    query.filter(s => s.id === id && isPublic(s)).map(s => (s, s.cityId)).result.headOption.flatMap {
+    load(id, filterPublic = true)
+
+  def load(id: Rep[Long], filterPublic: Boolean): DBIO[Option[Seller[_]]] = {
+    (if (filterPublic) {
+      query.filter(s => s.id === id && isPublic(s))
+    } else {
+      query.filter(_.id === id)
+    }).map(s => (s, s.cityId)).result.headOption.flatMap {
       case Some(row) => refineSeller(row).map(Some(_))
       case _ => DBIO.successful(None)
     }
+  }
+
+  def findIdByUserId(userId: Long): DBIO[Option[Long]] =
+    query.filter(_.userId === userId).map(_.id).result.headOption
 
   def findIdAndTypeByUserId(userId: Long): DBIO[Option[(Long, SellerType)]] =
     query.filter(_.userId === userId).map(s => (s.id, s.sellerType)).result.headOption

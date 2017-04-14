@@ -24,7 +24,7 @@ import akka.actor.{Actor, ActorSystem, InvalidActorNameException, Props}
 import akka.pattern.ask
 import akka.util.Timeout
 import ir.bama.models.SellerType.SellerType
-import ir.bama.models.{SellAd, Seller}
+import ir.bama.models.{Dealer, PrivateSeller, SellAd, Seller}
 import ir.bama.repositories.SellAdRepo
 import ir.bama.utils.Range
 
@@ -36,7 +36,7 @@ import scala.concurrent.{Await, ExecutionContext, Future}
   */
 @Singleton
 class SellAdService @Inject()(adRepo: SellAdRepo, sellerService: SellerService, system: ActorSystem)
-                             (implicit ec: ExecutionContext) extends BaseService[SellAd](adRepo) {
+                             (implicit ec: ExecutionContext) extends BaseService[SellAd, SellAdRepo](adRepo) {
 
   import adRepo.dbConfig._
   import profile.api._
@@ -54,18 +54,18 @@ class SellAdService @Inject()(adRepo: SellAdRepo, sellerService: SellerService, 
 
   private class PersistenceDispatcher extends Actor {
     override def receive: Receive = {
-      case p: Persist =>
-        val name = s"persister-${p.userId}"
+      case msg@Persist(userId, _, _) =>
+        val name = s"persister-$userId"
         context.child(name) match {
-          case Some(persister) => persister forward p
+          case Some(persister) => persister forward msg
           case _ =>
             val currentSender = sender()
-            sellerService.findIdAndTypeByUserId(p.userId).map {
+            sellerService.findIdAndTypeByUserId(userId).map {
               case Some((sellerId, sellerType)) =>
                 try {
-                  context.actorOf(Persister.props(sellerId, sellerType), name) tell(p, currentSender)
+                  context.actorOf(Persister.props(sellerId, sellerType), name) tell(msg, currentSender)
                 } catch {
-                  case _: InvalidActorNameException => self ! p
+                  case _: InvalidActorNameException => self ! msg
                 }
               case _ => sender ! None
             }
@@ -78,13 +78,13 @@ class SellAdService @Inject()(adRepo: SellAdRepo, sellerService: SellerService, 
     private val someSeller: Option[Seller[_]] = Some(Seller.id(sellerId))
 
     override def receive: Receive = {
-      case p: Persist =>
+      case Persist(_, ad, adsPerDay) =>
         val insertFuture = db.run {
           val startOfDay = Date.from(LocalDate.now().atStartOfDay().atZone(ZoneId.systemDefault()).toInstant)
           adRepo.countAds(sellerId, startOfDay, new Date()).flatMap { c =>
-            val max = p.adsPerDay(sellerType)
+            val max = adsPerDay(sellerType)
             if (c < max) {
-              adRepo.persist(p.ad.copy(seller = someSeller)).map(Right(_))
+              adRepo.persist(ad.copy(seller = someSeller)).map(Right(_))
             } else {
               DBIO.successful(Left(s"Only $max ads per day is allowed."))
             }
@@ -96,8 +96,27 @@ class SellAdService @Inject()(adRepo: SellAdRepo, sellerService: SellerService, 
 
   }
 
-  object Persister {
+  private object Persister {
     def props(sellerId: Long, sellerType: SellerType) = Props(new Persister(sellerId, sellerType))
+  }
+
+  def load(adId: Long, maybeUserId: Option[Long]): Future[Option[(SellAd, Boolean)]] = db.run {
+    (maybeUserId match {
+      case Some(userId) => sellerService.repo.findIdByUserId(userId).flatMap { maybeSellerId =>
+        adRepo.load(adId, maybeSellerId)
+      }
+      case _ => adRepo.load(adId, None)
+    }).map {
+      _.flatMap {
+        case result@(ad, owner) =>
+          ad.seller.map {
+            case x: PrivateSeller => if (x.publicProfile || owner) result else {
+              (ad.copy(seller = Some(Seller.phoneNumbers(x.phoneNumbers))), owner)
+            }
+            case _: Dealer => result
+          }
+      }
+    }
   }
 
   def listBySellerId(sellerId: Long, range: Option[Range]): Future[Seq[SellAd]] =

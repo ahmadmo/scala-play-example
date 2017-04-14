@@ -41,6 +41,7 @@ case class SellAd(id: Option[Long], seller: Option[Seller[_]], city: Option[City
 
 object SellAd {
   implicit val dateFormat: Format[Date] = Dates.dateFormat
+  implicit val format: OFormat[SellAd] = Json.format[SellAd]
 }
 
 abstract class Payment(val `type`: PaymentType) {
