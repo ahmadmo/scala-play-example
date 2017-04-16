@@ -16,15 +16,14 @@
 
 package ir.bama.services
 
-import java.time.{LocalDate, ZoneId}
-import java.util.Date
+import java.time.{LocalDate, LocalDateTime}
 import javax.inject.{Inject, Singleton}
 
 import akka.actor.{Actor, ActorSystem, InvalidActorNameException, Props}
 import akka.pattern.ask
 import akka.util.Timeout
 import ir.bama.models.SellerType.SellerType
-import ir.bama.models.{Dealer, PrivateSeller, SellAd, Seller}
+import ir.bama.models._
 import ir.bama.repositories.SellAdRepo
 import ir.bama.utils.Range
 
@@ -41,63 +40,141 @@ class SellAdService @Inject()(adRepo: SellAdRepo, sellerService: SellerService, 
   import repo.dbConfig._
   import profile.api._
 
-  private val dispatcher = system.actorOf(Props(new PersistenceDispatcher), "ad-persistence-dispatcher")
+  private val dispatcher = system.actorOf(Props(new ActionDispatcher), "ad-action-dispatcher")
   private implicit val timeout = Timeout(30 seconds)
 
-  type PersistResult = Option[Either[String, Long]]
-  type AdsPerDay = Map[SellerType, Int]
+  private val visibleStatuses = Seq(SellAdStatus.SUBMITTED, SellAdStatus.RESUBMITTED)
 
-  private case class Persist(userId: Long, ad: SellAd, adsPerDay: AdsPerDay)
+  type PersistenceResult = Option[Either[String, Long]]
+  type Limits = Map[SellerType, (Int, Int, Option[Int])]
 
-  def persist(userId: Long, ad: SellAd, adsPerDay: AdsPerDay): Future[PersistResult] =
-    (dispatcher ? Persist(userId, ad, adsPerDay)).mapTo[PersistResult]
+  private case class Submit(userId: Long, ad: SellAd, limits: Limits)
 
-  private class PersistenceDispatcher extends Actor {
+  private case class Resubmit(userId: Long, adId: Long, limits: Limits)
+
+  private case class Cancel(userId: Long, adId: Long)
+
+  def submit(userId: Long, ad: SellAd, limits: Limits): Future[PersistenceResult] =
+    (dispatcher ? Submit(userId, ad, limits)).mapTo[PersistenceResult]
+
+  def resubmit(userId: Long, adId: Long, limits: Limits): Future[PersistenceResult] =
+    (dispatcher ? Resubmit(userId, adId, limits)).mapTo[PersistenceResult]
+
+  def cancel(userId: Long, adId: Long): Future[PersistenceResult] =
+    (dispatcher ? Cancel(userId, adId)).mapTo[PersistenceResult]
+
+  private class ActionDispatcher extends Actor {
+
     override def receive: Receive = {
-      case msg@Persist(userId, _, _) =>
-        val name = s"persister-$userId"
-        context.child(name) match {
-          case Some(persister) => persister forward msg
-          case _ =>
-            val currentSender = sender()
-            sellerService.findIdAndTypeByUserId(userId).map {
-              case Some((sellerId, sellerType)) =>
-                try {
-                  context.actorOf(Persister.props(sellerId, sellerType), name) tell(msg, currentSender)
-                } catch {
-                  case _: InvalidActorNameException => self ! msg
-                }
-              case _ => sender ! None
-            }
-        }
+      case msg@Submit(userId, _, _) => dispatch(msg, userId)
+      case msg@Resubmit(userId, _, _) => dispatch(msg, userId)
+      case msg@Cancel(userId, _) => dispatch(msg, userId)
     }
+
+    private def dispatch(msg: Any, userId: Long) = {
+      val name = s"runner-$userId"
+      context.child(name) match {
+        case Some(runner) => runner forward msg
+        case _ =>
+          val currentSender = sender()
+          sellerService.findIdAndTypeByUserId(userId).map {
+            case Some((sellerId, sellerType)) =>
+              try {
+                context.actorOf(ActionRunner.props(sellerId, sellerType), name) tell(msg, currentSender)
+              } catch {
+                case _: InvalidActorNameException => self ! msg
+              }
+            case _ => currentSender ! None
+          }
+      }
+    }
+
   }
 
-  private class Persister(sellerId: Long, sellerType: SellerType) extends Actor {
+  private class ActionRunner(sellerId: Long, sellerType: SellerType) extends Actor {
 
     private val someSeller: Option[Seller[_]] = Some(Seller.id(sellerId))
 
     override def receive: Receive = {
-      case Persist(_, ad, adsPerDay) =>
-        val insertFuture = db.run {
-          val startOfDay = Date.from(LocalDate.now().atStartOfDay().atZone(ZoneId.systemDefault()).toInstant)
-          repo.countAds(sellerId, startOfDay, new Date()).flatMap { c =>
-            val max = adsPerDay(sellerType)
-            if (c < max) {
+      case Submit(_, ad, limits) => submit(ad, limits)
+      case Resubmit(_, adId, limits) => resubmit(adId, limits)
+      case Cancel(_, adId) => cancel(adId)
+    }
+
+    private def submit(ad: SellAd, limits: Limits) = {
+      val limit = limits(sellerType)
+      reply {
+        db.run {
+          val start = LocalDate.now().minusDays(limit._1 - 1).atStartOfDay()
+          repo.countAds(sellerId, start, LocalDateTime.now()).flatMap { c =>
+            if (c < limit._2) {
               repo.persist(ad.copy(seller = someSeller)).map(Right(_))
             } else {
-              DBIO.successful(Left(s"Only $max ads per day is allowed."))
+              DBIO.successful(Left(
+                s"You cannot submit more than ${limit._2} ad(s) in the period of ${limit._1} day(s). Please try again later."))
             }
+          }.map(Some(_))
+        }
+      }
+    }
+
+    private def resubmit(adId: Long, limits: Limits) = {
+      val limit = limits(sellerType)
+      reply {
+        db.run {
+          repo.findSellerIdAndStatusById(adId).flatMap {
+            case Some((seId, status)) =>
+              if (seId == sellerId) {
+                (if (visibleStatuses.contains(status)) {
+                  val start = LocalDate.now().minusDays(limit._1 - 1).atStartOfDay()
+                  repo.countSubmissions(adId, start, LocalDateTime.now()).flatMap {
+                    case (total, inRange) =>
+                      if (limit._3.exists(total < _)) {
+                        if (inRange < limit._2) {
+                          repo.resubmit(adId).map(_ => Right(adId))
+                        } else {
+                          DBIO.successful(Left(
+                            s"You cannot resubmit an ad more than ${limit._2} times in the period of ${limit._1} day(s). Please try again later."))
+                        }
+                      } else {
+                        DBIO.successful(Left(s"You cannot resubmit an ad more than ${limit._3} times."))
+                      }
+                  }
+                } else {
+                  DBIO.successful(Left("This ad is not is visible status."))
+                }).map(Some(_))
+              } else {
+                DBIO.successful(Left("You are not the owner of this ad."))
+              }
+            case _ => DBIO.successful(None)
           }
         }
-        // we have to wait for result of the operation (i.e. block), to prevent concurrent inserts
-        sender ! Some(Await.result(insertFuture, Duration.Inf))
+      }
+    }
+
+    private def cancel(adId: Long) = reply {
+      db.run {
+        repo.findSellerIdById(adId).flatMap {
+          case Some(seId) =>
+            (if (seId == sellerId) {
+              repo.cancel(adId).map(_ => Right(adId))
+            } else {
+              DBIO.successful(Left("You are not the owner of this ad."))
+            }).map(Some(_))
+          case None => DBIO.successful(None)
+        }
+      }
+    }
+
+    private def reply[T](opFuture: Future[T]) = {
+      // we have to wait for result of the operation (i.e. block), to prevent concurrent inserts/updates
+      sender ! Await.result(opFuture, Duration.Inf)
     }
 
   }
 
-  private object Persister {
-    def props(sellerId: Long, sellerType: SellerType) = Props(new Persister(sellerId, sellerType))
+  private object ActionRunner {
+    def props(sellerId: Long, sellerType: SellerType) = Props(new ActionRunner(sellerId, sellerType))
   }
 
   def load(adId: Long, maybeUserId: Option[Long]): Future[Option[(SellAd, Boolean)]] = db.run {
@@ -120,13 +197,13 @@ class SellAdService @Inject()(adRepo: SellAdRepo, sellerService: SellerService, 
 
   def list(maybeUserId: Option[Long], range: Option[Range]): Future[Seq[(SellAd, Boolean)]] = db.run {
     findSellerId(maybeUserId) { maybeSellerId =>
-      repo.list(maybeSellerId, range)
+      repo.list(maybeSellerId, visibleStatuses, range)
     }
   }
 
   def listBySellerId(sellerId: Long, maybeUserId: Option[Long], range: Option[Range]): Future[Seq[(SellAd, Boolean)]] = db.run {
     findSellerId(maybeUserId) { maybeSellerId =>
-      repo.listBySellerId(sellerId, maybeSellerId, range)
+      repo.listBySellerId(sellerId, maybeSellerId, visibleStatuses, range)
     }
   }
 

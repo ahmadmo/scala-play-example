@@ -16,7 +16,7 @@
 
 package ir.bama.models
 
-import java.util.Date
+import java.time.LocalDateTime
 
 import ir.bama.utils.{Dates, Enums}
 import play.api.libs.functional.syntax._
@@ -46,16 +46,16 @@ object User {
 
 }
 
-case class UserLogin(id: Option[Long], user: Option[User], ip: String, lastAccessTime: Date) extends Identifiable
+case class UserLogin(id: Option[Long], user: Option[User], ip: String, lastAccessTime: LocalDateTime) extends Identifiable
 
 object UserLogin {
 
-  implicit val dateFormat: Format[Date] = Dates.dateFormat
+  implicit val dateFormat: Format[LocalDateTime] = Dates.dateFormat
 
   private val reads: Reads[UserLogin] =
     ((JsPath \ "id").readNullable[Long] and
       (JsPath \ "ip").read[String] and
-      (JsPath \ "lastAccessTime").read[Date]).tupled.map {
+      (JsPath \ "lastAccessTime").read[LocalDateTime]).tupled.map {
       case (id, ip, lastAccessTime) => UserLogin(id, None, ip, lastAccessTime)
     }
 

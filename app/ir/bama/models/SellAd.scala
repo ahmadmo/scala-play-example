@@ -16,7 +16,7 @@
 
 package ir.bama.models
 
-import java.util.Date
+import java.time.LocalDateTime
 
 import ir.bama.models.CarCategory.CarCategory
 import ir.bama.models.CarChassis.CarChassis
@@ -35,12 +35,12 @@ import play.api.libs.json._
   */
 case class SellAd(id: Option[Long], seller: Option[Seller[_]], city: Option[City],
                   venue: String, phoneNumber: Option[String],
-                  submissionDates: Option[Seq[Date]], lastSubmissionDate: Date,
+                  submissionDates: Option[Seq[LocalDateTime]], lastSubmissionDate: LocalDateTime,
                   count: Int, soldCount: Int, status: SellAdStatus,
                   payment: Payment, car: Car, stats: Option[SellAdStats]) extends Identifiable
 
 object SellAd {
-  implicit val dateFormat: Format[Date] = Dates.dateFormat
+  implicit val dateFormat: Format[LocalDateTime] = Dates.dateFormat
   implicit val format: OFormat[SellAd] = Json.format[SellAd]
 }
 

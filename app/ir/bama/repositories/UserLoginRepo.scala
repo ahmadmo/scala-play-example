@@ -16,7 +16,8 @@
 
 package ir.bama.repositories
 
-import java.util.Date
+import java.time.LocalDateTime
+import java.time.temporal.ChronoUnit
 import javax.inject.{Inject, Singleton}
 
 import ir.bama.models.{User, UserLogin}
@@ -36,7 +37,7 @@ class UserLoginRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, userRepo
   import dbConfig._
   import profile.api._
 
-  private type LoginRow = (Option[Long], Long, String, Date)
+  private type LoginRow = (Option[Long], Long, String, LocalDateTime)
 
   class UserLoginTable(tag: Tag) extends Table[UserLogin](tag, "T_USER_LOGIN") {
 
@@ -48,7 +49,7 @@ class UserLoginRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, userRepo
 
     def ip: Rep[String] = column[String]("C_IP", NotNull)
 
-    def lastAccessTime: Rep[Date] = column[Date]("C_LAST_ACCESS_TIME", NotNull)
+    def lastAccessTime: Rep[LocalDateTime] = column[LocalDateTime]("C_LAST_ACCESS_TIME", NotNull)
 
     override def * : ProvenShape[UserLogin] = (id.?, userId, ip, lastAccessTime) <> (toLogin, fromLogin)
 
@@ -67,7 +68,7 @@ class UserLoginRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, userRepo
   override protected val idColumn: (UserLoginTable) => Rep[Long] = _.id
 
   def updateAccess(loginId: Long, idleTimeout: Long): DBIO[Boolean] =
-    filterNotExpired(loginId, idleTimeout).map(_.lastAccessTime).update(new Date()).map(_ == 1)
+    filterNotExpired(loginId, idleTimeout).map(_.lastAccessTime).update(LocalDateTime.now()).map(_ == 1)
 
   def findUserId(loginId: Long, idleTimeout: Long): DBIO[Option[Long]] =
     filterNotExpired(loginId, idleTimeout).map(_.userId).result.headOption
@@ -98,11 +99,12 @@ class UserLoginRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, userRepo
     login.userId === userId && notExpired(login, idleTimeout)
   }
 
-  private def notExpired(login: UserLoginTable, idleTimeout: Long) =
-    login.lastAccessTime > new Date(System.currentTimeMillis - idleTimeout)
+  private def notExpired(login: UserLoginTable, idleTimeout: Long) = {
+    login.lastAccessTime > LocalDateTime.now().minus(idleTimeout, ChronoUnit.MILLIS)
+  }
 
   def deleteExpiredLogins(idleTimeout: Long): DBIO[Int] = query.filter {
-    _.lastAccessTime <= new Date(System.currentTimeMillis - idleTimeout)
+    _.lastAccessTime <= LocalDateTime.now().minus(idleTimeout, ChronoUnit.MILLIS)
   }.delete
 
 }

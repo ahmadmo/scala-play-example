@@ -16,7 +16,7 @@
 
 package ir.bama.repositories
 
-import java.util.Date
+import java.time.LocalDateTime
 import javax.inject.{Inject, Singleton}
 
 import ir.bama.models.SellerType.SellerType
@@ -41,7 +41,7 @@ class SellerRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, cityRepo: C
 
   implicit val sellerTypeMapper: BaseColumnType[SellerType] = enumMapper(SellerType)
 
-  private type SellerRow = (Option[Long], SellerType, Long, String, Date, Long, String, Option[String],
+  private type SellerRow = (Option[Long], SellerType, Long, String, LocalDateTime, Long, String, Option[String],
     Option[Boolean], Option[String], Option[String])
 
   class SellerTable(tag: Tag) extends Table[Seller[_]](tag, "T_SELLER") {
@@ -56,7 +56,7 @@ class SellerRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, cityRepo: C
 
     def name: Rep[String] = column[String]("C_NAME", O.SqlType("VARCHAR"), O.Length(255), NotNull)
 
-    def registrationDate: Rep[Date] = column[Date]("C_REGISTRATION_DATE", NotNull)
+    def registrationDate: Rep[LocalDateTime] = column[LocalDateTime]("C_REGISTRATION_DATE", NotNull)
 
     def cityId: Rep[Long] = column[Long]("C_CITY_ID", NotNull)
 

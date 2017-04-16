@@ -16,6 +16,7 @@
 
 package ir.bama
 
+import com.typesafe.config.ConfigValue
 import play.api.data.Forms.nonEmptyText
 import play.api.data.format.Formatter
 import play.api.data.validation.Constraints
@@ -23,9 +24,10 @@ import play.api.data.{Form, FormError, Mapping}
 import play.api.http.ContentTypes
 import play.api.libs.json.{JsValue, Json, Writes}
 import play.api.mvc.Results._
-import play.api.mvc.{Codec, Request, Result}
+import play.api.mvc.{Codec, Request, Result, Results}
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.reflect.ClassTag
 
 /**
   * @author ahmad
@@ -85,18 +87,33 @@ package object controllers {
     } getOrElse NotFound
   }
 
-  implicit class SaveResultLike(val id: Long) extends AnyVal {
+  implicit class SimpleSaveResultLike(val id: Long) extends AnyVal {
     def saved: Result = saved(Ok)
     def saved(status: Status): Result = status(Json.obj("id" -> id)).as(json)
   }
 
-  implicit class MaybeSaveResultLike(val maybeId: Option[Long]) extends AnyVal {
+  implicit class MaybeSimpleSaveResultLike(val maybeId: Option[Long]) extends AnyVal {
     def saved: Result = saved(Ok)
-    def saved(status: Status): Result = savedOrElse(status, InternalServerError)
+    def saved(status: Status): Result = savedOrElse(status, NotFound)
     def savedOrElse(alternative: => Status): Result = savedOrElse(Ok, alternative)
     def savedOrElse(status: Status, alternative: => Status): Result = maybeId.map { id =>
       status(Json.obj("id" -> id)).as(json)
     } getOrElse alternative
+  }
+
+  implicit class ComplexSaveResultLike(val result: Option[Either[String, Long]]) extends AnyVal {
+    def saved: Result = saved(Ok)
+    def saved(status: Status): Result = savedOrElse(status, NotFound)
+    def savedOrElse(alternative: => Status): Result = savedOrElse(Ok, alternative)
+    def savedOrElse(status: Status, alternative: => Status): Result = result match {
+      case Some(res) => res match {
+        case Left(errorMessage) =>
+          alternative
+          Err.service(errorMessage).asJsonError(Results.BadRequest)
+        case Right(id) => id.saved
+      }
+      case _ => alternative
+    }
   }
 
   implicit class ErrResultLike(val x: Err) extends AnyVal {
@@ -129,14 +146,21 @@ package object controllers {
     def asJson(status: Status)(implicit tjs: Writes[A], ec: ExecutionContext): Future[Result] = f.map(_.asJson(status))
   }
 
-  implicit class FutureSaveResultLike(val f: Future[Long]) extends AnyVal {
+  implicit class FutureSimpleSaveResultLike(val f: Future[Long]) extends AnyVal {
     def saved(implicit ec: ExecutionContext): Future[Result] = saved(Ok)
     def saved(status: Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.saved(status))
   }
 
-  implicit class FutureMaybeSaveResultLike(val f: Future[Option[Long]]) extends AnyVal {
+  implicit class FutureMaybeSimpleSaveResultLike(val f: Future[Option[Long]]) extends AnyVal {
     def saved(implicit ec: ExecutionContext): Future[Result] = saved(Ok)
-    def saved(status: Status)(implicit ec: ExecutionContext): Future[Result] = savedOrElse(status, InternalServerError)
+    def saved(status: Status)(implicit ec: ExecutionContext): Future[Result] = savedOrElse(status, NotFound)
+    def savedOrElse(alternative: => Status)(implicit ec: ExecutionContext): Future[Result] = savedOrElse(Ok, alternative)
+    def savedOrElse(status: Status, alternative: => Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.savedOrElse(status, alternative))
+  }
+
+  implicit class FutureComplexSaveResultLike(val f: Future[Option[Either[String, Long]]]) extends AnyVal {
+    def saved(implicit ec: ExecutionContext): Future[Result] = saved(Ok)
+    def saved(status: Status)(implicit ec: ExecutionContext): Future[Result] = savedOrElse(status, NotFound)
     def savedOrElse(alternative: => Status)(implicit ec: ExecutionContext): Future[Result] = savedOrElse(Ok, alternative)
     def savedOrElse(status: Status, alternative: => Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.savedOrElse(status, alternative))
   }
@@ -216,6 +240,16 @@ package object controllers {
       regex = "^(?:\\+98|0)\\s?\\d{3}\\s?\\d{3}\\s?\\d{2}\\s?\\d{2}$".r,
       error = "Invalid Phone Number"))
 
+  }
+
+  implicit class ConfigValueLike(val c: ConfigValue) extends AnyVal {
+    def asOpt[T: ClassTag](implicit ct: ClassTag[T]): Option[T] =
+      Option(c).map(value => ct.runtimeClass.cast(value.unwrapped()).asInstanceOf[T])
+    def as[T: ClassTag]: T = asOpt[T].get
+    def asEnumOpt[E <: Enumeration](enum: E): Option[E#Value] = {
+      asOpt[String].map(s => enum.withName(s.toUpperCase))
+    }
+    def asEnum[E <: Enumeration](enum: E): E#Value = asEnumOpt(enum).get
   }
 
   // @formatter:on

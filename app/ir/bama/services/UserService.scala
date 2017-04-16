@@ -16,7 +16,7 @@
 
 package ir.bama.services
 
-import java.util.Date
+import java.time.LocalDateTime
 import javax.inject.{Inject, Singleton}
 
 import ir.bama.models.LogoutTarget.LogoutTarget
@@ -37,7 +37,7 @@ class UserService @Inject()(userRepo: UserRepo, userLoginRepo: UserLoginRepo)
 
   def login(username: String, passwordMatcher: (String) => Boolean, ip: String): Future[Option[Long]] = db.run {
     val action = repo.loadByCredentials(username, passwordMatcher).flatMap {
-      case someUser@Some(_) => userLoginRepo.persist(UserLogin(None, someUser, ip, new Date())).map(Some(_))
+      case someUser@Some(_) => userLoginRepo.persist(UserLogin(None, someUser, ip, LocalDateTime.now())).map(Some(_))
       case _ => DBIO.successful(None)
     }
     action

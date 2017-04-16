@@ -16,9 +16,10 @@
 
 package ir.bama.repositories
 
-import java.util.Date
+import java.time.LocalDateTime
 import javax.inject.{Inject, Singleton}
 
+import ir.bama.models
 import ir.bama.models.CarCategory.CarCategory
 import ir.bama.models.CarChassis.CarChassis
 import ir.bama.models.CarDifferential.CarDifferential
@@ -50,7 +51,7 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
 
   implicit val sellAdStatusMapper: BaseColumnType[SellAdStatus] = enumMapper(SellAdStatus)
 
-  private type SellAdRow = (Option[Long], Long, Long, String, Option[String], Date, Int, Int, SellAdStatus, PaymentRow, CarRow)
+  private type SellAdRow = (Option[Long], Long, Long, String, Option[String], LocalDateTime, Int, Int, SellAdStatus, PaymentRow, CarRow)
 
   class SellAdTable(tag: Tag) extends Table[SellAd](tag, "T_SELL_AD") with PaymentTable with CarTable {
 
@@ -69,7 +70,7 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
 
     def phoneNumber: Rep[String] = column[String]("C_PHONE_NUMBER", O.SqlType("VARCHAR"), O.Length(20), Nullable)
 
-    def lastSubmissionDate: Rep[Date] = column[Date]("C_LAST_SUBMISSION_DATE", NotNull)
+    def lastSubmissionDate: Rep[LocalDateTime] = column[LocalDateTime]("C_LAST_SUBMISSION_DATE", NotNull)
 
     def count: Rep[Int] = column[Int]("C_COUNT", NotNull)
 
@@ -160,7 +161,7 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
 
   }
 
-  type SubmissionDate = (Long, Date)
+  type SubmissionDate = (Long, LocalDateTime)
 
   class SubmissionDateTable(tag: Tag) extends Table[SubmissionDate](tag, "T_SUBMISSION_DATE") {
 
@@ -168,7 +169,7 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
 
     def ad: ForeignKeyQuery[_, SellAd] = foreignKey("FK_AD_SUBMISSION_DATE", adId, query)(_.id, onDelete = ForeignKeyAction.Cascade)
 
-    def when: Rep[Date] = column[Date]("C_WHEN", NotNull)
+    def when: Rep[LocalDateTime] = column[LocalDateTime]("C_WHEN", NotNull)
 
     def pk: PrimaryKey = primaryKey("PK_SUBMISSION_DATE", (adId, when))
 
@@ -319,11 +320,11 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
         val qSeller = sellerRepo.load(sellerId, filterPublic = false)
         val qCity = cityRepo.load(cityId)
         val qCarModel = modelRepo.load(modelId)
-        val qCarPhotos = carPhotosAction(adId, None)
+        val qCarPhotos = listCarPhotos(adId, None)
         val joinQuery = (qSeller zip qCity) zip (qCarModel zip qCarPhotos)
         (if (owner) {
           val qStats = stats.filter(_.adId === adId).result.headOption
-          val qDates = submissionDatesAction(adId)
+          val qDates = listSubmissionDates(adId)
           joinQuery.zip(qStats zip qDates).map {
             case (((someSeller@Some(_), someCity@Some(_)), (someModel@Some(_), names)), (someStats@Some(_), dates)) =>
               ad.copy(
@@ -350,23 +351,46 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
     }
   }
 
-  def countAds(sellerId: Long, fromDate: Date, toDate: Date): DBIO[Int] =
+  def countAds(sellerId: Long, fromDate: LocalDateTime, toDate: LocalDateTime): DBIO[Int] =
     query.filter { ad =>
       ad.sellerId === sellerId && ad.lastSubmissionDate.between(fromDate, toDate)
     }.length.result
 
-  def list(maybeSellerId: Option[Long], range: Option[Range]): DBIO[Seq[(SellAd, Boolean)]] =
-    listByQuery(query, maybeSellerId, range)
+  def findSellerIdById(adId: Long): DBIO[Option[Long]] =
+    query.filter(_.id === adId).map(_.sellerId).result.headOption
 
-  def listBySellerId(sellerId: Long, maybeSellerId: Option[Long], range: Option[Range]): DBIO[Seq[(SellAd, Boolean)]] =
-    listByQuery(query.filter(_.sellerId === sellerId), maybeSellerId, range)
+  def findSellerIdAndStatusById(adId: Long): DBIO[Option[(Long, SellAdStatus)]] =
+    query.filter(_.id === adId).map(ad => (ad.sellerId, ad.adStatus)).result.headOption
 
-  private def listByQuery(query: Query[SellAdTable, SellAd, Seq], maybeSellerId: Option[Long], range: Option[Range],
+  def resubmit(adId: Long): DBIO[Boolean] = {
+    val now = LocalDateTime.now
+    query.filter(_.id === adId).map(ad => (ad.adStatus, ad.lastSubmissionDate)).update((SellAdStatus.RESUBMITTED, now)).flatMap { c =>
+      if (c == 1) {
+        (submissionDates += (adId, now)).map(_ => true)
+      } else {
+        DBIO.successful(false)
+      }
+    }
+  }
+
+  def cancel(adId: Long): DBIO[Boolean] =
+    query.filter(_.id === adId).map(_.adStatus).update(SellAdStatus.CANCELLED).map(_ == 1)
+
+  def list(maybeSellerId: Option[Long], statuses: Seq[models.SellAdStatus.Value],
+           range: Option[Range]): DBIO[Seq[(SellAd, Boolean)]] =
+    listByQuery(query, maybeSellerId, statuses, range)
+
+  def listBySellerId(sellerId: Long, maybeSellerId: Option[Long],
+                     statuses: Seq[models.SellAdStatus.Value], range: Option[Range]): DBIO[Seq[(SellAd, Boolean)]] =
+    listByQuery(query.filter(_.sellerId === sellerId), maybeSellerId, statuses, range)
+
+  private def listByQuery(query: Query[SellAdTable, SellAd, Seq], maybeSellerId: Option[Long],
+                          statuses: Seq[models.SellAdStatus.Value], range: Option[Range],
                           sortByFields: Seq[(SellAdTable) => ColumnOrdered[_]] = Seq(_.lastSubmissionDate desc, _.id asc)) = {
     val listQuery = sortByFields.foldLeft {
       maybeSellerId match {
         case Some(sellerId) => query.filter { ad =>
-          ad.sellerId === sellerId || ad.adStatus.inSet(Seq(SellAdStatus.SUBMITTED, SellAdStatus.RESUBMITTED))
+          ad.sellerId === sellerId || ad.adStatus.inSet(statuses)
         }
         case _ => query.filter { ad =>
           ad.adStatus.inSet(Seq(SellAdStatus.SUBMITTED, SellAdStatus.RESUBMITTED))
@@ -385,7 +409,7 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
             val owner = maybeSellerId.contains(sellerId)
             val qCity = cityRepo.load(cityId)
             val qCarModel = modelRepo.load(modelId)
-            val qCarPhotos = carPhotosAction(adId, 0 ~ 1)
+            val qCarPhotos = listCarPhotos(adId, 0 ~ 1)
             val joinQuery = qCity zip qCarModel zip qCarPhotos
             (if (owner) {
               val qStats = stats.filter(_.adId === adId).result.headOption
@@ -406,10 +430,16 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
     }
   }
 
-  private def submissionDatesAction(adId: Long) =
+  def listSubmissionDates(adId: Long): DBIO[Seq[LocalDateTime]] =
     submissionDates.filter(_.adId === adId).sortBy(d => (d.when asc, d.adId asc)).map(_.when).result
 
-  private def carPhotosAction(adId: Long, range: Option[Range]) =
+  def countSubmissions(adId: Long, fromDate: LocalDateTime, toDate: LocalDateTime): DBIO[(Int, Int)] = {
+    val qDates = submissionDates.filter(_.adId === adId).length.result
+    val qDatesBetween = submissionDates.filter(d => d.adId === adId && d.when.between(fromDate, toDate)).length.result
+    qDates zip qDatesBetween
+  }
+
+  private def listCarPhotos(adId: Long, range: Option[Range]) =
     pagedQuery[CarPhotoTable](carPhotos.filter(_.adId === adId).sortBy(_.order asc), range).map(_.photo).result
 
   private def prePaidsAction(adId: Long) =

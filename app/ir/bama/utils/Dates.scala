@@ -16,8 +16,9 @@
 
 package ir.bama.utils
 
-import java.text.{ParseException, SimpleDateFormat}
-import java.util.Date
+import java.text.ParseException
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 import play.api.libs.json._
 
@@ -26,13 +27,13 @@ import play.api.libs.json._
   */
 object Dates {
 
-  val format = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+  val formatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 
-  def fromJs(js: JsValue): Either[String, Date] = {
+  def fromJs(js: JsValue): Either[String, LocalDateTime] = {
     js match {
       case JsString(s) =>
         try {
-          Right(format.parse(s))
+          Right(LocalDateTime.parse(s, formatter))
         } catch {
           case _: ParseException => Left("Unknown date format")
         }
@@ -40,10 +41,10 @@ object Dates {
     }
   }
 
-  val dateReads: Reads[Date] = Reads[Date](fromJs(_).fold(JsError(_), JsSuccess(_)))
-  val dateWrites: Writes[Date] = Writes[Date] { v =>
-    if (v == null) JsNull else JsString(format.format(v))
+  val dateReads: Reads[LocalDateTime] = Reads[LocalDateTime](fromJs(_).fold(JsError(_), JsSuccess(_)))
+  val dateWrites: Writes[LocalDateTime] = Writes[LocalDateTime] { v =>
+    if (v == null) JsNull else JsString(formatter.format(v))
   }
-  val dateFormat: Format[Date] = Format(dateReads, dateWrites)
+  val dateFormat: Format[LocalDateTime] = Format(dateReads, dateWrites)
 
 }

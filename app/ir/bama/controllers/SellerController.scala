@@ -17,7 +17,8 @@
 package ir.bama.controllers
 
 import java.nio.file.Paths
-import java.util.{Date, UUID}
+import java.time.LocalDateTime
+import java.util.UUID
 import javax.inject.{Inject, Singleton}
 
 import akka.stream.Materializer
@@ -62,11 +63,11 @@ class SellerController @Inject()(sellerService: SellerService, authController: A
   case class SellerData(userData: UserData, name: String, cityId: Long, address: String, phoneNumbers: Seq[String]) {
 
     def toPrivateSeller(publicProfile: Boolean): PrivateSeller = PrivateSeller(
-      None, Some(userData.toUser), name, new Date(), Some(City.id(cityId)), address, None,
+      None, Some(userData.toUser), name, LocalDateTime.now(), Some(City.id(cityId)), address, None,
       Some(phoneNumbers.distinct), publicProfile)
 
     def toDealer(dealerData: DealerData): Dealer = Dealer(
-      None, Some(userData.toUser), name, new Date(), Some(City.id(cityId)), address, None,
+      None, Some(userData.toUser), name, LocalDateTime.now(), Some(City.id(cityId)), address, None,
       Some(phoneNumbers.distinct), dealerData.manager, dealerData.licenceNumber)
 
   }

@@ -18,10 +18,12 @@ package ir.bama.controllers
 
 import java.io.File
 import java.nio.file.Paths
-import java.util.{Date, UUID}
+import java.time.LocalDateTime
+import java.util.UUID
 import javax.inject.{Inject, Singleton}
 
 import akka.stream.Materializer
+import com.typesafe.config.ConfigObject
 import ir.bama.models.CarCategory.CarCategory
 import ir.bama.models.CarChassis.CarChassis
 import ir.bama.models.CarDifferential.CarDifferential
@@ -30,7 +32,8 @@ import ir.bama.models.CarGearBox.CarGearBox
 import ir.bama.models.CarStatus.CarStatus
 import ir.bama.models.PaymentPeriod.PaymentPeriod
 import ir.bama.models.PaymentType.PaymentType
-import ir.bama.models.{PaymentType, _}
+import ir.bama.models.SellerType.SellerType
+import ir.bama.models.{PaymentType, SellerType, _}
 import ir.bama.services.SellAdService
 import ir.bama.utils.RangeLike
 import play.api.Configuration
@@ -54,10 +57,25 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
   private lazy val filesDir = Paths.get(configs.getString("app.dir.files").get)
   private lazy val maxPhotos = configs.getInt("controllers.ad.maxPhotos").get
   private lazy val maxPhotoSize = configs.getBytes("controllers.ad.maxPhotoSize").get
-  private lazy val adsPerDay = Map(
-    SellerType.PRIVATE -> configs.getInt("controllers.ad.adsPerDay.private").get,
-    SellerType.DEALER -> configs.getInt("controllers.ad.adsPerDay.dealer").get
-  )
+
+  import scala.collection.JavaConverters._
+
+  private lazy val limits: Map[String, Map[SellerType, (Int, Int, Option[Int])]] = {
+    val ls = for (entry <- configs.getList("controllers.ad.limits").get.asScala) yield {
+      val obj = entry.asInstanceOf[ConfigObject]
+      (
+        obj.get("func").as[String],
+        (
+          obj.get("seller").asEnum(SellerType),
+          (
+            obj.get("period").as[Integer].intValue(), obj.get("count").as[Integer].intValue(),
+            obj.get("max").asOpt[Integer].map(_.intValue())
+          )
+        )
+      )
+    }
+    ls.groupBy(_._1).map(x => (x._1, x._2.map(_._2).toMap))
+  }
 
   sealed trait PaymentData {
     def toPayment: Payment
@@ -118,7 +136,7 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
   )(CarData.apply)(CarData.unapply)
 
   case class SellAdData[P <: PaymentData](cityId: Long, venue: String, phoneNumber: Option[String], count: Int, paymentData: P, carData: CarData) {
-    def toSellAd: SellAd = SellAd(None, None, Some(City.id(cityId)), venue, phoneNumber, None, new Date(), count, 0, SellAdStatus.SUBMITTED,
+    def toSellAd: SellAd = SellAd(None, None, Some(City.id(cityId)), venue, phoneNumber, None, LocalDateTime.now(), count, 0, SellAdStatus.SUBMITTED,
       paymentData.toPayment, carData.toCar, None)
   }
 
@@ -157,16 +175,9 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
                     case Right(files) =>
                       val ad = adData.toSellAd
                       val names = files.map(_._1)
-                      adService.persist(request.login.userId, ad.copy(car = ad.car.copy(photos = Some(names))), adsPerDay).map {
-                        case Some(insertResult) => insertResult match {
-                          case Left(errorMessage) =>
-                            files.foreach(_._2.delete())
-                            Err.service(errorMessage).asJsonError(Results.BadRequest)
-                          case Right(adId) => adId.saved
-                        }
-                        case _ =>
-                          files.foreach(_._2.delete())
-                          Results.NotFound
+                      adService.submit(request.login.userId, ad.copy(car = ad.car.copy(photos = Some(names))), limits("submit")).savedOrElse {
+                        files.foreach(_._2.delete())
+                        Results.InternalServerError
                       }
                   }
                 }
@@ -197,6 +208,14 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
     } else Left {
       errors
     }
+  }
+
+  def resubmit(id: Long): Action[AnyContent] = authController.authenticated.async { request =>
+    adService.resubmit(request.login.userId, id, limits("resubmit")).saved
+  }
+
+  def cancel(id: Long): Action[AnyContent] = authController.authenticated.async { request =>
+    adService.cancel(request.login.userId, id).saved
   }
 
   def load(id: Long): Action[AnyContent] = authController.maybeAuthenticated.async { request =>

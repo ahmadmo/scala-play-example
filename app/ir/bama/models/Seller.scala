@@ -16,7 +16,7 @@
 
 package ir.bama.models
 
-import java.util.Date
+import java.time.LocalDateTime
 
 import ir.bama.models.SellerType.SellerType
 import ir.bama.utils.{Dates, Enums}
@@ -36,7 +36,7 @@ abstract class Seller[T](val `type`: SellerType)
 
   val user: Option[User]
   val name: String
-  val registrationDate: Date
+  val registrationDate: LocalDateTime
   val city: Option[City]
   val address: String
   val photo: Option[String]
@@ -95,22 +95,22 @@ object SellerType extends Enumeration {
 
 }
 
-case class PrivateSeller(id: Option[Long], user: Option[User], name: String, registrationDate: Date,
+case class PrivateSeller(id: Option[Long], user: Option[User], name: String, registrationDate: LocalDateTime,
                          city: Option[City], address: String, photo: Option[String],
                          phoneNumbers: Option[Seq[String]], publicProfile: Boolean)
   extends Seller[PrivateSeller](SellerType.PRIVATE)
 
 object PrivateSeller {
-  implicit val dateFormat: Format[Date] = Dates.dateFormat
+  implicit val dateFormat: Format[LocalDateTime] = Dates.dateFormat
   implicit val format: OFormat[PrivateSeller] = Json.format[PrivateSeller]
 }
 
-case class Dealer(id: Option[Long], user: Option[User], name: String, registrationDate: Date,
+case class Dealer(id: Option[Long], user: Option[User], name: String, registrationDate: LocalDateTime,
                   city: Option[City], address: String, photo: Option[String],
                   phoneNumbers: Option[Seq[String]], manager: String, licenceNumber: String)
   extends Seller[Dealer](SellerType.DEALER)
 
 object Dealer {
-  implicit val dateFormat: Format[Date] = Dates.dateFormat
+  implicit val dateFormat: Format[LocalDateTime] = Dates.dateFormat
   implicit val format: OFormat[Dealer] = Json.format[Dealer]
 }

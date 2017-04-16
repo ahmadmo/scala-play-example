@@ -17,7 +17,7 @@
 package ir.bama.repositories
 
 import java.sql.Timestamp
-import java.util.Date
+import java.time.LocalDateTime
 
 import ir.bama.utils.Range
 import play.api.Logger
@@ -58,9 +58,9 @@ abstract class BaseRepo[Entity](dbConfigProvider: DatabaseConfigProvider)(implic
   protected def enumMapper[E <: Enumeration](enum: E): BaseColumnType[E#Value] =
     MappedColumnType.base[E#Value, String](_.toString, s => enum.withName(s))
 
-  protected implicit val utilDateMapper: BaseColumnType[Date] = MappedColumnType.base[Date, Timestamp](
-    date => new Timestamp(date.getTime),
-    timestamp => new Date(timestamp.getTime)
+  protected implicit val dateMapper: BaseColumnType[LocalDateTime] = MappedColumnType.base[LocalDateTime, Timestamp](
+    dateTime => Timestamp.valueOf(dateTime),
+    timestamp => timestamp.toLocalDateTime
   )
 
   protected def pagedQuery(range: Option[Range]): Query[TableType, Entity, Seq] = pagedQuery[TableType](query, range)
