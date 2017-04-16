@@ -215,4 +215,16 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
     case (ad, owner) => Map("ad" -> Json.toJson(ad), "owner" -> JsBoolean(owner))
   }
 
+  def incrementViews(id: Long): Action[AnyContent] = Action.async {
+    adService.incrementViews(id).map { success =>
+      if (success) id.saved else Err.request("Entity not found.").asJsonError(Results.NotFound)
+    }
+  }
+
+  def incrementPhoneNumberViews(id: Long): Action[AnyContent] = Action.async {
+    adService.incrementPhoneNumberViews(id).map { success =>
+      if (success) id.saved else Err.request("Entity not found.").asJsonError(Results.NotFound)
+    }
+  }
+
 }

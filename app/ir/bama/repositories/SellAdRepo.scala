@@ -415,4 +415,18 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
   private def prePaidsAction(adId: Long) =
     prePaids.filter(_.adId === adId).sortBy(_.order asc).map(_.amount).result
 
+  def incrementViews(adId: Long): DBIO[Boolean] = incrementValue {
+    stats.filter(_.adId === adId).map(_.adViews)
+  }
+
+  def incrementPhoneNumberViews(adId: Long): DBIO[Boolean] = incrementValue {
+    stats.filter(_.adId === adId).map(_.phoneNumberViews)
+  }
+
+  private def incrementValue(query: Query[Rep[Int], Int, Seq]) =
+    query.forUpdate.result.headOption.flatMap {
+      case Some(value) => query.update(value + 1).map(_ == 1)
+      case _ => DBIO.successful(false)
+    }
+
 }

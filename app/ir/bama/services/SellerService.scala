@@ -31,37 +31,37 @@ import scala.concurrent.{ExecutionContext, Future}
 @Singleton
 class SellerService @Inject()(sellerRepo: SellerRepo)(implicit ec: ExecutionContext) extends BaseService[Seller[_], SellerRepo](sellerRepo) {
 
-  import sellerRepo.dbConfig._
+  import repo.dbConfig._
   import profile.api._
 
   def load(id: Long, filterPublic: Boolean): Future[Option[Seller[_]]] =
-    db.run(sellerRepo.load(id, filterPublic))
+    db.run(repo.load(id, filterPublic))
 
   def findIdAndTypeByUserId(userId: Long): Future[Option[(Long, SellerType)]] =
-    db.run(sellerRepo.findIdAndTypeByUserId(userId))
+    db.run(repo.findIdAndTypeByUserId(userId))
 
   def loadByUserId(userId: Long): Future[Option[Seller[_]]] =
-    db.run(sellerRepo.loadByUserId(userId))
+    db.run(repo.loadByUserId(userId))
 
   def updatePhoto(userId: Long, name: String): Future[Option[Long]] =
-    db.run(sellerRepo.updatePhoto(userId, name))
+    db.run(repo.updatePhoto(userId, name))
 
   def deletePhoto(userId: Long): Future[Option[(Long, Option[String])]] =
-    db.run(sellerRepo.deletePhoto(userId))
+    db.run(repo.deletePhoto(userId))
 
   def listByType(`type`: SellerType, range: Option[Range]): Future[Seq[Seller[_]]] =
-    db.run(sellerRepo.listByType(`type`, range))
+    db.run(repo.listByType(`type`, range))
 
   def listByProvinceId(provinceId: Long, range: Option[Range]): Future[Seq[Seller[_]]] =
-    db.run(sellerRepo.listByProvinceId(provinceId, range))
+    db.run(repo.listByProvinceId(provinceId, range))
 
   def listByCityId(cityId: Long, range: Option[Range]): Future[Seq[Seller[_]]] =
-    db.run(sellerRepo.listByCityId(cityId, range))
+    db.run(repo.listByCityId(cityId, range))
 
   def listByTypeAndProvinceId(`type`: SellerType, provinceId: Long, range: Option[Range]): Future[Seq[Seller[_]]] =
-    db.run(sellerRepo.listByTypeAndProvinceId(`type`, provinceId, range))
+    db.run(repo.listByTypeAndProvinceId(`type`, provinceId, range))
 
   def listByTypeAndCityId(`type`: SellerType, cityId: Long, range: Option[Range]): Future[Seq[Seller[_]]] =
-    db.run(sellerRepo.listByTypeAndCityId(`type`, cityId, range))
+    db.run(repo.listByTypeAndCityId(`type`, cityId, range))
 
 }

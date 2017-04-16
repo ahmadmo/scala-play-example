@@ -30,9 +30,9 @@ import scala.concurrent.{ExecutionContext, Future}
 @Singleton
 class CityService @Inject()(cityRepo: CityRepo)(implicit ec: ExecutionContext) extends BaseService[City, CityRepo](cityRepo) {
 
-  import cityRepo.dbConfig._
+  import repo.dbConfig._
 
   def listByProvinceId(provinceId: Long, range: Option[Range]): Future[Seq[City]] =
-    db.run(cityRepo.listByProvinceId(provinceId, range))
+    db.run(repo.listByProvinceId(provinceId, range))
 
 }

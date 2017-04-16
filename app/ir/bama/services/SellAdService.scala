@@ -38,7 +38,7 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 class SellAdService @Inject()(adRepo: SellAdRepo, sellerService: SellerService, system: ActorSystem)
                              (implicit ec: ExecutionContext) extends BaseService[SellAd, SellAdRepo](adRepo) {
 
-  import adRepo.dbConfig._
+  import repo.dbConfig._
   import profile.api._
 
   private val dispatcher = system.actorOf(Props(new PersistenceDispatcher), "ad-persistence-dispatcher")
@@ -81,10 +81,10 @@ class SellAdService @Inject()(adRepo: SellAdRepo, sellerService: SellerService, 
       case Persist(_, ad, adsPerDay) =>
         val insertFuture = db.run {
           val startOfDay = Date.from(LocalDate.now().atStartOfDay().atZone(ZoneId.systemDefault()).toInstant)
-          adRepo.countAds(sellerId, startOfDay, new Date()).flatMap { c =>
+          repo.countAds(sellerId, startOfDay, new Date()).flatMap { c =>
             val max = adsPerDay(sellerType)
             if (c < max) {
-              adRepo.persist(ad.copy(seller = someSeller)).map(Right(_))
+              repo.persist(ad.copy(seller = someSeller)).map(Right(_))
             } else {
               DBIO.successful(Left(s"Only $max ads per day is allowed."))
             }
@@ -102,7 +102,7 @@ class SellAdService @Inject()(adRepo: SellAdRepo, sellerService: SellerService, 
 
   def load(adId: Long, maybeUserId: Option[Long]): Future[Option[(SellAd, Boolean)]] = db.run {
     findSellerId(maybeUserId) { maybeSellerId =>
-      adRepo.load(adId, maybeSellerId)
+      repo.load(adId, maybeSellerId)
     }.map {
       _.flatMap {
         case result@(ad, owner) =>
@@ -120,13 +120,13 @@ class SellAdService @Inject()(adRepo: SellAdRepo, sellerService: SellerService, 
 
   def list(maybeUserId: Option[Long], range: Option[Range]): Future[Seq[(SellAd, Boolean)]] = db.run {
     findSellerId(maybeUserId) { maybeSellerId =>
-      adRepo.list(maybeSellerId, range)
+      repo.list(maybeSellerId, range)
     }
   }
 
   def listBySellerId(sellerId: Long, maybeUserId: Option[Long], range: Option[Range]): Future[Seq[(SellAd, Boolean)]] = db.run {
     findSellerId(maybeUserId) { maybeSellerId =>
-      adRepo.listBySellerId(sellerId, maybeSellerId, range)
+      repo.listBySellerId(sellerId, maybeSellerId, range)
     }
   }
 
@@ -135,5 +135,11 @@ class SellAdService @Inject()(adRepo: SellAdRepo, sellerService: SellerService, 
       case Some(userId) => sellerService.repo.findIdByUserId(userId).flatMap(block)
       case _ => block(None)
     }
+
+  def incrementViews(adId: Long): Future[Boolean] =
+    db.run(repo.incrementViews(adId))
+
+  def incrementPhoneNumberViews(adId: Long): Future[Boolean] =
+    db.run(repo.incrementPhoneNumberViews(adId))
 
 }

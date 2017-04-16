@@ -30,9 +30,9 @@ import scala.concurrent.{ExecutionContext, Future}
 @Singleton
 class CarBrandService @Inject()(brandRepo: CarBrandRepo)(implicit ec: ExecutionContext) extends BaseService[CarBrand, CarBrandRepo](brandRepo) {
 
-  import brandRepo.dbConfig._
+  import repo.dbConfig._
 
   def searchByName(name: String, range: Option[Range]): Future[Seq[CarBrand]] =
-    db.run(brandRepo.searchByName(name, range))
+    db.run(repo.searchByName(name, range))
 
 }
