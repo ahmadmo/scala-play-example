@@ -17,6 +17,7 @@
 package ir.bama
 
 import com.typesafe.config.ConfigValue
+import ir.bama.services.ServiceError
 import play.api.data.Forms.nonEmptyText
 import play.api.data.format.Formatter
 import play.api.data.validation.Constraints
@@ -42,30 +43,24 @@ package object controllers {
   implicit val formErrorWrites: Writes[FormError] = Writes[FormError] { error =>
     error.args.foldLeft(Json.obj(
       "key" -> error.key,
-      "message" -> error.message, // TODO: get error message from messages api
-      "category" -> "FormError"
+      "message" -> error.message // TODO: get error message from messages api
     )) {
       case (js, (key: String, value: JsValue)) => js ++ Json.obj(key -> value)
       case (js, _) => js
     }
   }
 
-  case class Err(category: String, message: String, args: Seq[(String, JsValue)] = Nil) {
-    def this(category: String, message: String, arg: (String, JsValue)) = this(category, message, Seq(arg))
+  case class Err(message: String, args: Seq[(String, JsValue)] = Nil) {
+    def this(message: String, arg: (String, JsValue)) = this(message, Seq(arg))
   }
 
   object Err {
-    def apply(category: String, message: String, arg: (String, JsValue)): Err = new Err(category, message, arg)
-    def request(message: String, args: Seq[(String, JsValue)] = Nil): Err = Err("RequestError", message, args)
-    def request(message: String, arg: (String, JsValue)): Err = Err("RequestError", message, arg)
-    def service(message: String, args: Seq[(String, JsValue)] = Nil): Err = Err("ServiceError", message, args)
-    def service(message: String, arg: (String, JsValue)): Err = Err("ServiceError", message, arg)
+    def apply(message: String, arg: (String, JsValue)): Err = new Err(message, arg)
   }
 
   implicit val errWrites: Writes[Err] = Writes[Err] { error =>
     error.args.foldLeft(Json.obj(
-      "message" -> error.message, // TODO: get error message from messages api
-      "category" -> error.category
+      "message" -> error.message // TODO: get error message from messages api
     )) {
       case (js, (key, value)) => js ++ Json.obj(key -> value)
     }
@@ -101,18 +96,17 @@ package object controllers {
     } getOrElse alternative
   }
 
-  implicit class ComplexSaveResultLike(val result: Option[Either[String, Long]]) extends AnyVal {
-    def saved: Result = saved(Ok)
-    def saved(status: Status): Result = savedOrElse(status, NotFound)
-    def savedOrElse(alternative: => Status): Result = savedOrElse(Ok, alternative)
-    def savedOrElse(status: Status, alternative: => Status): Result = result match {
-      case Some(res) => res match {
-        case Left(errorMessage) =>
-          alternative
-          Err.service(errorMessage).asJsonError(Results.BadRequest)
-        case Right(id) => id.saved
-      }
-      case _ => alternative
+  implicit class ComplexSaveResultLike(val e: services.PersistenceResult) extends AnyVal {
+    def result: Result = maybeSuccess(_.saved)
+    def maybeSuccess(block: (Option[Long]) => Result): Result = foldResult(block, error => Results.Status(error.statusCode))
+    def onError(block: (ServiceError) => Unit): Result = handleError { error =>
+      block(error)
+      Results.Status(error.statusCode)
+    }
+    def handleError(block: (ServiceError) => Status): Result = foldResult(_.saved, block)
+    def foldResult(maybeSuccess: (Option[Long]) => Result, onError: (ServiceError) => Status): Result = e match {
+      case Left(error) => Err(error.message).asJsonError(onError(error))
+      case Right(id) => maybeSuccess(id)
     }
   }
 
@@ -137,51 +131,52 @@ package object controllers {
   }
 
   implicit class FutureResultLike[A](val f: Future[A]) extends AnyVal {
-    def asJson(implicit tjs: Writes[A], ec: ExecutionContext): Future[Result] = asJson(Ok)
+    def asJson(implicit tjs: Writes[A], ec: ExecutionContext): Future[Result] = f.map(_.asJson)
     def asJson(status: Status)(implicit tjs: Writes[A], ec: ExecutionContext): Future[Result] = f.map(_.asJson(status))
   }
 
   implicit class FutureMaybeResultLike[A](val f: Future[Option[A]]) extends AnyVal {
-    def asJson(implicit tjs: Writes[A], ec: ExecutionContext): Future[Result] = asJson(Ok)
+    def asJson(implicit tjs: Writes[A], ec: ExecutionContext): Future[Result] = f.map(_.asJson)
     def asJson(status: Status)(implicit tjs: Writes[A], ec: ExecutionContext): Future[Result] = f.map(_.asJson(status))
   }
 
   implicit class FutureSimpleSaveResultLike(val f: Future[Long]) extends AnyVal {
-    def saved(implicit ec: ExecutionContext): Future[Result] = saved(Ok)
-    def saved(status: Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.saved(status))
+    def asyncResult(implicit ec: ExecutionContext): Future[Result] = f.map(_.saved)
+    def asyncResult(status: Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.saved(status))
   }
 
   implicit class FutureMaybeSimpleSaveResultLike(val f: Future[Option[Long]]) extends AnyVal {
-    def saved(implicit ec: ExecutionContext): Future[Result] = saved(Ok)
-    def saved(status: Status)(implicit ec: ExecutionContext): Future[Result] = savedOrElse(status, NotFound)
-    def savedOrElse(alternative: => Status)(implicit ec: ExecutionContext): Future[Result] = savedOrElse(Ok, alternative)
+    def asyncResult(implicit ec: ExecutionContext): Future[Result] = f.map(_.saved)
+    def asyncResult(status: Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.saved(status))
+    def savedOrElse(alternative: => Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.savedOrElse(alternative))
     def savedOrElse(status: Status, alternative: => Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.savedOrElse(status, alternative))
   }
 
-  implicit class FutureComplexSaveResultLike(val f: Future[Option[Either[String, Long]]]) extends AnyVal {
-    def saved(implicit ec: ExecutionContext): Future[Result] = saved(Ok)
-    def saved(status: Status)(implicit ec: ExecutionContext): Future[Result] = savedOrElse(status, NotFound)
-    def savedOrElse(alternative: => Status)(implicit ec: ExecutionContext): Future[Result] = savedOrElse(Ok, alternative)
-    def savedOrElse(status: Status, alternative: => Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.savedOrElse(status, alternative))
+  implicit class FutureComplexSaveResultLike(val f: Future[services.PersistenceResult]) extends AnyVal {
+    def asyncResult(implicit ec: ExecutionContext): Future[Result] = f.map(_.result)
+    def maybeSuccess(block: (Option[Long]) => Result)(implicit ec: ExecutionContext): Future[Result] = f.map(_.maybeSuccess(block))
+    def onError(block: (ServiceError) => Unit)(implicit ec: ExecutionContext): Future[Result] = f.map(_.onError(block))
+    def handleError(block: (ServiceError) => Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.handleError(block))
+    def foldResultAsync(maybeSuccess: (Option[Long]) => Result, onError: (ServiceError) => Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.foldResult(maybeSuccess, onError))
   }
 
   implicit class FutureErrResultLike(val f: Future[Err]) extends AnyVal {
-    def asJsonError(implicit ec: ExecutionContext): Future[Result] = asJsonError(BadRequest)
+    def asJsonError(implicit ec: ExecutionContext): Future[Result] = f.map(_.asJsonError)
     def asJsonError(status: Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.asJsonError(status))
   }
 
   implicit class FutureErrSeqResultLike(val f: Future[Seq[Err]]) extends AnyVal {
-    def asJsonError(implicit ec: ExecutionContext): Future[Result] = asJsonError(BadRequest)
+    def asJsonError(implicit ec: ExecutionContext): Future[Result] = f.map(_.asJsonError)
     def asJsonError(status: Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.asJsonError(status))
   }
 
   implicit class FutureFormErrorResultLike(val f: Future[FormError]) extends AnyVal {
-    def asJsonError(implicit ec: ExecutionContext): Future[Result] = asJsonError(BadRequest)
+    def asJsonError(implicit ec: ExecutionContext): Future[Result] = f.map(_.asJsonError)
     def asJsonError(status: Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.asJsonError(status))
   }
 
   implicit class FutureFormErrorSeqResultLike(val f: Future[Seq[FormError]]) extends AnyVal {
-    def asJsonError(implicit ec: ExecutionContext): Future[Result] = asJsonError(BadRequest)
+    def asJsonError(implicit ec: ExecutionContext): Future[Result] = f.map(_.asJsonError)
     def asJsonError(status: Status)(implicit ec: ExecutionContext): Future[Result] = f.map(_.asJsonError(status))
   }
 
@@ -190,7 +185,7 @@ package object controllers {
     def map(data: Map[String, Seq[String]])(block: (A) => Future[Result]): Future[Result] = fold(form.bindFromRequest(data), block)
     def map(block: (A) => Future[Result])(implicit r: Request[_]): Future[Result] = fold(form.bindFromRequest, block)
     private def fold(form: Form[A], block: (A) => Future[Result]) = form.fold(
-      formWithErrors => formWithErrors.errors.asJsonError(BadRequest).future,
+      formWithErrors => formWithErrors.errors.asJsonError.future,
       block.apply
     )
   }
@@ -204,9 +199,9 @@ package object controllers {
         lf.fold(formWithErrors => Left(formWithErrors.errors), Right(_)),
         rf.fold(formWithErrors => Left(formWithErrors.errors), Right(_))
       ) match {
-        case (Left(le), Left(re)) => (le ++ re).asJsonError(BadRequest).future
-        case (Left(le), Right(_)) => le.asJsonError(BadRequest).future
-        case (Right(_), Left(re)) => re.asJsonError(BadRequest).future
+        case (Left(le), Left(re)) => (le ++ re).asJsonError.future
+        case (Left(le), Right(_)) => le.asJsonError.future
+        case (Right(_), Left(re)) => re.asJsonError.future
         case (Right(a), Right(b)) => block(a, b)
       }
     }

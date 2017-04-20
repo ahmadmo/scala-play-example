@@ -156,11 +156,11 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
     authController.authenticated.async(parse.maxLength(maxPhotos * maxPhotoSize, parse.multipartFormData)) { implicit request =>
       request.body match {
         case Left(_) =>
-          Err.request("Max size exceeded.", "maxSize" -> JsNumber(maxPhotos * maxPhotoSize))
+          Err("Max size exceeded.", "maxSize" -> JsNumber(maxPhotos * maxPhotoSize))
             .asJsonError(Results.EntityTooLarge).future
         case Right(data: MultipartFormData[Files.TemporaryFile]) =>
           if (data.files.size > maxPhotos) {
-            Err.request(s"Only $maxPhotos photos allowed.").asJsonError.future
+            Err(s"Only $maxPhotos photos allowed.").asJsonError.future
           } else data.asFormUrlEncoded.get("data").filter(_.nonEmpty).map(_.head).map(Json.parse).map { json =>
             paymentTypeFormatter.bind("payment.type", (json \ "payment" \ "type").asOpt[String]) match {
               case Left(errors) => errors.asJsonError(Results.BadRequest).future
@@ -175,15 +175,14 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
                     case Right(files) =>
                       val ad = adData.toSellAd
                       val names = files.map(_._1)
-                      adService.submit(request.login.userId, ad.copy(car = ad.car.copy(photos = Some(names))), limits("submit")).savedOrElse {
+                      adService.submit(request.login.userId, ad.copy(car = ad.car.copy(photos = Some(names))), limits("submit")).onError { _ =>
                         files.foreach(_._2.delete())
-                        Results.InternalServerError
                       }
                   }
                 }
             }
           }.getOrElse {
-            Err.request("Missing required parameter.", Seq("parameter" -> JsString("data"))).asJsonError.future
+            Err("Missing required parameter.", Seq("parameter" -> JsString("data"))).asJsonError.future
           }
       }
     }
@@ -211,11 +210,11 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
   }
 
   def resubmit(id: Long): Action[AnyContent] = authController.authenticated.async { request =>
-    adService.resubmit(request.login.userId, id, limits("resubmit")).saved
+    adService.resubmit(request.login.userId, id, limits("resubmit")).asyncResult
   }
 
   def cancel(id: Long): Action[AnyContent] = authController.authenticated.async { request =>
-    adService.cancel(request.login.userId, id).saved
+    adService.cancel(request.login.userId, id).asyncResult
   }
 
   def load(id: Long): Action[AnyContent] = authController.maybeAuthenticated.async { request =>
@@ -236,13 +235,13 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
 
   def incrementViews(id: Long): Action[AnyContent] = Action.async {
     adService.incrementViews(id).map { success =>
-      if (success) id.saved else Err.request("Entity not found.").asJsonError(Results.NotFound)
+      if (success) id.saved else Err("Entity not found.").asJsonError(Results.NotFound)
     }
   }
 
   def incrementPhoneNumberViews(id: Long): Action[AnyContent] = Action.async {
     adService.incrementPhoneNumberViews(id).map { success =>
-      if (success) id.saved else Err.request("Entity not found.").asJsonError(Results.NotFound)
+      if (success) id.saved else Err("Entity not found.").asJsonError(Results.NotFound)
     }
   }
 

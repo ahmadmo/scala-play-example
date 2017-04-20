@@ -89,7 +89,7 @@ class AuthController @Inject()(userService: UserService, system: ActorSystem, co
       userService.login(credentials.username, credentials.password.bcryptMatches(_), request.remoteAddress).map {
         case Some(loginId) =>
           LoginResult(AccessToken(loginId), Some(RefreshToken(loginId)), tokenType, accessTokenExpiration).asJson
-        case _ => Err.request("Bad Credentials").asJsonError(Results.Unauthorized)
+        case _ => Err("Bad Credentials").asJsonError(Results.Unauthorized)
       }
     }
   }
@@ -105,7 +105,7 @@ class AuthController @Inject()(userService: UserService, system: ActorSystem, co
     override protected def refine[A](request: Request[A]): Future[Either[Result, UserRequest[A]]] =
       (extractToken(request) match {
         case Some(token) => Right(new UserRequest[A](token, request))
-        case _ => Left(Err.request("Unauthorized Access").asJsonError(Results.Unauthorized))
+        case _ => Left(Err("Unauthorized Access").asJsonError(Results.Unauthorized))
       }).future
   }
 
@@ -116,9 +116,9 @@ class AuthController @Inject()(userService: UserService, system: ActorSystem, co
       AccessToken(request.token) match {
         case Some(loginId) => userService.findUserId(loginId, loginIdleTimeout, updateAccess = true).map {
           case Some(userId) => Right(new AuthenticatedUserRequest[A](LoginInfo(loginId, userId), request))
-          case _ => Left(Err.request("Invalid Token").asJsonError(Results.Unauthorized))
+          case _ => Left(Err("Invalid Token").asJsonError(Results.Unauthorized))
         }
-        case _ => Left(Err.request("Unauthorized Access").asJsonError(Results.Unauthorized)).future
+        case _ => Left(Err("Unauthorized Access").asJsonError(Results.Unauthorized)).future
       }
   }
 
@@ -163,10 +163,10 @@ class AuthController @Inject()(userService: UserService, system: ActorSystem, co
           if (success) {
             RefreshResult(AccessToken(loginId), tokenType, accessTokenExpiration).asJson
           } else {
-            Err.request("Invalid Token").asJsonError(Results.Unauthorized)
+            Err("Invalid Token").asJsonError(Results.Unauthorized)
           }
         }
-      case _ => Err.request("Unauthorized Access").asJsonError(Results.Unauthorized).future
+      case _ => Err("Unauthorized Access").asJsonError(Results.Unauthorized).future
     }
   }
 
@@ -174,12 +174,12 @@ class AuthController @Inject()(userService: UserService, system: ActorSystem, co
     case Success(target) => UserAction.async { request =>
       AccessToken(request.token) match {
         case Some(loginId) => userService.logout(loginId, loginIdleTimeout, target).map { success =>
-          if (success) Ok else Err.request("Invalid Token").asJsonError(Results.Unauthorized)
+          if (success) Ok else Err("Invalid Token").asJsonError(Results.Unauthorized)
         }
-        case _ => Err.request("Unauthorized Access").asJsonError(Results.Unauthorized).future
+        case _ => Err("Unauthorized Access").asJsonError(Results.Unauthorized).future
       }
     }
-    case _ => Action(Err.request(s"Invalid target.", "target" -> JsString(from)).asJsonError)
+    case _ => Action(Err(s"Invalid target.", "target" -> JsString(from)).asJsonError)
   }
 
   sealed trait Token {

@@ -41,7 +41,7 @@ class CarController @Inject()(brandService: CarBrandService, modelService: CarMo
 
   def addBrand: Action[JsValue] = Action.async(parse.json) { implicit request =>
     nameForm.map { name =>
-      brandService.persist(CarBrand(None, name)).saved
+      brandService.persist(CarBrand(None, name)).asyncResult
     }
   }
 
@@ -55,7 +55,7 @@ class CarController @Inject()(brandService: CarBrandService, modelService: CarMo
 
   def addModel(brandId: Long): Action[JsValue] = Action.async(parse.json) { implicit request =>
     nameForm.map { name =>
-      modelService.persist(CarModel(None, Some(CarBrand.id(brandId)), name)).saved
+      modelService.persist(CarModel(None, Some(CarBrand.id(brandId)), name)).asyncResult
     }
   }
 

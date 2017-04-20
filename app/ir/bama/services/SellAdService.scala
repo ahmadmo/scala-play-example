@@ -26,6 +26,7 @@ import ir.bama.models.SellerType.SellerType
 import ir.bama.models._
 import ir.bama.repositories.SellAdRepo
 import ir.bama.utils.Range
+import play.api.http.Status._
 
 import scala.concurrent.duration.{Duration, DurationLong}
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -45,7 +46,6 @@ class SellAdService @Inject()(adRepo: SellAdRepo, sellerService: SellerService, 
 
   private val visibleStatuses = Seq(SellAdStatus.SUBMITTED, SellAdStatus.RESUBMITTED)
 
-  type PersistenceResult = Option[Either[String, Long]]
   type Limits = Map[SellerType, (Int, Int, Option[Int])]
 
   private case class Submit(userId: Long, ad: SellAd, limits: Limits)
@@ -103,70 +103,76 @@ class SellAdService @Inject()(adRepo: SellAdRepo, sellerService: SellerService, 
 
     private def submit(ad: SellAd, limits: Limits) = {
       val limit = limits(sellerType)
-      reply {
+      replyBlocking {
         db.run {
           val start = LocalDate.now().minusDays(limit._1 - 1).atStartOfDay()
-          repo.countAds(sellerId, start, LocalDateTime.now()).flatMap { c =>
+          val action: DBIO[PersistenceResult] = repo.countAds(sellerId, start, LocalDateTime.now()).flatMap { c =>
             if (c < limit._2) {
-              repo.persist(ad.copy(seller = someSeller)).map(Right(_))
+              repo.persist(ad.copy(seller = someSeller)).map(id => Right(Some(id)))
             } else {
               DBIO.successful(Left(
                 s"You cannot submit more than ${limit._2} ad(s) in the period of ${limit._1} day(s). Please try again later."))
             }
-          }.map(Some(_))
+          }
+          action
         }
       }
     }
 
     private def resubmit(adId: Long, limits: Limits) = {
       val limit = limits(sellerType)
-      reply {
+      replyBlocking {
         db.run {
-          repo.findSellerIdAndStatusById(adId).flatMap {
+          val action: DBIO[PersistenceResult] = repo.findSellerIdAndStatusById(adId).flatMap {
             case Some((seId, status)) =>
-              if (seId == sellerId) {
-                (if (visibleStatuses.contains(status)) {
-                  val start = LocalDate.now().minusDays(limit._1 - 1).atStartOfDay()
-                  repo.countSubmissions(adId, start, LocalDateTime.now()).flatMap {
-                    case (total, inRange) =>
-                      if (limit._3.exists(total < _)) {
-                        if (inRange < limit._2) {
-                          repo.resubmit(adId).map(_ => Right(adId))
-                        } else {
-                          DBIO.successful(Left(
-                            s"You cannot resubmit an ad more than ${limit._2} times in the period of ${limit._1} day(s). Please try again later."))
-                        }
-                      } else {
-                        DBIO.successful(Left(s"You cannot resubmit an ad more than ${limit._3} times."))
-                      }
-                  }
-                } else {
-                  DBIO.successful(Left("This ad is not is visible status."))
-                }).map(Some(_))
+              if (seId != sellerId) {
+                DBIO.successful(Left("You are not the owner of this ad.".error(FORBIDDEN)))
+              } else if (visibleStatuses.contains(status)) {
+                val start = LocalDate.now().minusDays(limit._1 - 1).atStartOfDay()
+                repo.countSubmissions(adId, start, LocalDateTime.now()).flatMap {
+                  case (total, inRange) =>
+                    if (limit._3.exists(total >= _)) {
+                      DBIO.successful(Left(
+                        s"You cannot resubmit an ad more than ${limit._3.get} times."))
+                    } else if (inRange >= limit._2) {
+                      DBIO.successful(Left(
+                        s"You cannot resubmit an ad more than ${limit._2} times in the period of ${limit._1} day(s). Please try again later."))
+                    } else {
+                      repo.resubmit(adId).map(_ => Right(Some(adId)))
+                    }
+                }
               } else {
-                DBIO.successful(Left("You are not the owner of this ad."))
+                DBIO.successful(Left("This ad is not in visible status.".error(FORBIDDEN)))
               }
-            case _ => DBIO.successful(None)
+            case _ => DBIO.successful(Right(None))
           }
+          action
         }
       }
     }
 
-    private def cancel(adId: Long) = reply {
+    private def cancel(adId: Long) = replyBlocking {
       db.run {
-        repo.findSellerIdById(adId).flatMap {
+        val action: DBIO[PersistenceResult] = repo.findSellerIdById(adId).flatMap {
           case Some(seId) =>
-            (if (seId == sellerId) {
-              repo.cancel(adId).map(_ => Right(adId))
+            if (seId == sellerId) {
+              repo.cancel(adId).map { success =>
+                if (success) {
+                  Right(Some(adId))
+                } else {
+                  Left("This ad has already been canceled.")
+                }
+              }
             } else {
-              DBIO.successful(Left("You are not the owner of this ad."))
-            }).map(Some(_))
-          case None => DBIO.successful(None)
+              DBIO.successful(Left("You are not the owner of this ad.".error(FORBIDDEN)))
+            }
+          case None => DBIO.successful(Right(None))
         }
+        action
       }
     }
 
-    private def reply[T](opFuture: Future[T]) = {
+    private def replyBlocking(opFuture: Future[PersistenceResult]) = {
       // we have to wait for result of the operation (i.e. block), to prevent concurrent inserts/updates
       sender ! Await.result(opFuture, Duration.Inf)
     }

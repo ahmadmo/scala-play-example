@@ -374,7 +374,7 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
   }
 
   def cancel(adId: Long): DBIO[Boolean] =
-    query.filter(_.id === adId).map(_.adStatus).update(SellAdStatus.CANCELLED).map(_ == 1)
+    query.filter(ad => ad.id === adId && ad.adStatus =!= SellAdStatus.CANCELLED).map(_.adStatus).update(SellAdStatus.CANCELLED).map(_ == 1)
 
   def list(maybeSellerId: Option[Long], statuses: Seq[models.SellAdStatus.Value],
            range: Option[Range]): DBIO[Seq[(SellAd, Boolean)]] =
