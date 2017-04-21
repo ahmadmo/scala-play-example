@@ -126,7 +126,7 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
 
   val carMapping: Mapping[CarData] = mapping(
     "model" -> single("id" -> longNumber),
-    "year" -> number(min = 1),
+    "year" -> number(min = 1000, max = 9999),
     "chassis" -> default(of[CarChassis], CarChassis.SEDAN),
     "differential" -> default(of[CarDifferential], CarDifferential.FWD),
     "category" -> default(of[CarCategory], CarCategory.NORMAL),
