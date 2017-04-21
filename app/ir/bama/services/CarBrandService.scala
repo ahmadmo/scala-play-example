@@ -20,7 +20,6 @@ import javax.inject.{Inject, Singleton}
 
 import ir.bama.models.CarBrand
 import ir.bama.repositories.CarBrandRepo
-import ir.bama.utils.Range
 
 import scala.concurrent.{ExecutionContext, Future}
 

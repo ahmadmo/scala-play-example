@@ -17,7 +17,6 @@
 package ir.bama.services
 
 import ir.bama.repositories.BaseRepo
-import ir.bama.utils.Range
 import play.api.Logger
 
 import scala.concurrent.{ExecutionContext, Future}

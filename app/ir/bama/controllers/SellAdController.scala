@@ -34,6 +34,10 @@ import ir.bama.models.PaymentPeriod.PaymentPeriod
 import ir.bama.models.PaymentType.PaymentType
 import ir.bama.models.SellerType.SellerType
 import ir.bama.models.{PaymentType, SellerType, _}
+import ir.bama.repositories.SellAdRepo.SortColumn.SortColumn
+import ir.bama.repositories.SellAdRepo.{ListRanges, ListSpecs, SortColumn}
+import ir.bama.repositories.SortOrder
+import ir.bama.repositories.SortOrder.SortOrder
 import ir.bama.services.SellAdService
 import ir.bama.utils.RangeLike
 import play.api.Configuration
@@ -86,22 +90,22 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
   }
 
   val creditPaymentMapping: Mapping[CreditPaymentData] = mapping(
-    "finalPrice" -> longNumber
+    "finalPrice" -> longNumber(min = 1)
   )(CreditPaymentData.apply)(CreditPaymentData.unapply)
 
-  case class InstallmentPaymentData(prePaids: Seq[Long], period: PaymentPeriod, ticks: Int,
-                                    numberOfPayments: Int, amountPerPayment: Long) extends PaymentData {
-    override def toPayment: Payment = InstallmentPayment(Some(prePaids), period, ticks, numberOfPayments, amountPerPayment)
+  case class InstallmentPaymentData(prepayments: Seq[Long], period: PaymentPeriod, ticks: Int,
+                                    numberOfInstallments: Int, amountPerInstallment: Long) extends PaymentData {
+    override def toPayment: Payment = InstallmentPayment(Some(prepayments), period, ticks, numberOfInstallments, amountPerInstallment)
   }
 
   implicit val paymentPeriodFormatter: Formatter[PaymentPeriod] = Formats.enumFormat(PaymentPeriod)
 
   val installmentPaymentMapping: Mapping[InstallmentPaymentData] = mapping(
-    "prePaids" -> seq(longNumber(min = 1)),
+    "prepayments" -> seq(longNumber(min = 1)),
     "period" -> default(of[PaymentPeriod], PaymentPeriod.MONTHLY),
     "ticks" -> default(number(min = 1), 1),
-    "numberOfPayments" -> number(min = 1),
-    "amountPerPayment" -> longNumber(min = 1)
+    "numberOfInstallments" -> number(min = 1),
+    "amountPerInstallment" -> longNumber(min = 1)
   )(InstallmentPaymentData.apply)(InstallmentPaymentData.unapply)
 
   case class CarData(modelId: Long, year: Int,
@@ -150,7 +154,7 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
       "car" -> carMapping
     )(SellAdData.apply)(SellAdData.unapply))
 
-  val paymentTypeFormatter: RichFormatter[PaymentType] = Formats.enumFormat(PaymentType)
+  implicit val paymentTypeFormatter: RichFormatter[PaymentType] = Formats.enumFormat(PaymentType)
 
   def submit: Action[Either[MaxSizeExceeded, MultipartFormData[Files.TemporaryFile]]] =
     authController.authenticated.async(parse.maxLength(maxPhotos * maxPhotoSize, parse.multipartFormData)) { implicit request =>
@@ -221,18 +225,6 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
     adService.load(id, request.login.map(_.userId)).map(_.map(refineResult)).asJson
   }
 
-  def list(offset: Int, length: Int): Action[AnyContent] = authController.maybeAuthenticated.async { request =>
-    adService.list(request.login.map(_.userId), offset ~ length).map(_.map(refineResult)).asJson
-  }
-
-  def listBySellerId(sellerId: Long, offset: Int, length: Int): Action[AnyContent] = authController.maybeAuthenticated.async { request =>
-    adService.listBySellerId(sellerId, request.login.map(_.userId), offset ~ length).map(_.map(refineResult)).asJson
-  }
-
-  private val refineResult: ((SellAd, Boolean)) => Map[String, JsValue] = {
-    case (ad, owner) => Map("ad" -> Json.toJson(ad), "owner" -> JsBoolean(owner))
-  }
-
   def incrementViews(id: Long): Action[AnyContent] = Action.async {
     adService.incrementViews(id).map { success =>
       if (success) id.saved else Err("Entity not found.").asJsonError(Results.NotFound)
@@ -243,6 +235,57 @@ class SellAdController @Inject()(adService: SellAdService, authController: AuthC
     adService.incrementPhoneNumberViews(id).map { success =>
       if (success) id.saved else Err("Entity not found.").asJsonError(Results.NotFound)
     }
+  }
+
+  implicit val sellAdSortColumnFormatter: Formatter[SortColumn] = Formats.enumFormat(SortColumn)
+  implicit val sortOrderFormatter: Formatter[SortOrder] = Formats.enumFormat(SortOrder)
+
+  val listForm = Form(
+    tuple(
+      "sellerId" -> optional(longNumber), "modelId" -> optional(longNumber),
+      "paymentType" -> optional(of[PaymentType]), "withPhoto" -> optional(boolean),
+      "sortColumn" -> default(of[SortColumn], SortColumn.DATE), "sortOrder" -> default(of[SortOrder], SortOrder.DESC),
+      "fromYear" -> optional(number(min = 1000, max = 9999)), "toYear" -> optional(number(min = 1000, max = 9999)),
+      "fromMileage" -> optional(number(min = 0)), "toMileage" -> optional(number(min = 1)),
+      "fromPrice" -> optional(longNumber(min = 1)), "toPrice" -> optional(longNumber(min = 1)),
+      "fromPrepayment" -> optional(longNumber(min = 1)), "toPrepayment" -> optional(longNumber(min = 1)),
+      "fromInstallmentAmount" -> optional(longNumber(min = 1)), "toInstallmentAmount" -> optional(longNumber(min = 1))
+    ).verifying("Invalid year range.", _ match {
+      case (_, _, _, _, _, _, Some(min: Int), Some(max: Int), _, _, _, _, _, _, _, _) => min <= max
+      case _ => true
+    }).verifying("Invalid mileage range.", _ match {
+      case (_, _, _, _, _, _, _, _, Some(min: Int), Some(max: Int), _, _, _, _, _, _) => min <= max
+      case _ => true
+    }).verifying("Invalid price range.", _ match {
+      case (_, _, _, _, _, _, _, _, _, _, Some(min: Long), Some(max: Long), _, _, _, _) => min <= max
+      case _ => true
+    }).verifying("Invalid prepayment range.", _ match {
+      case (_, _, _, _, _, _, _, _, _, _, _, _, Some(min: Long), Some(max: Long), _, _) => min <= max
+      case _ => true
+    }).verifying("Invalid installment amount range.", _ match {
+      case (_, _, _, _, _, _, _, _, _, _, _, _, _, _, Some(min: Long), Some(max: Long)) => min <= max
+      case _ => true
+    }))
+
+  def list(offset: Int, length: Int): Action[AnyContent] = authController.maybeAuthenticated.async { implicit request =>
+    listForm.map {
+      _ match {
+        case (sellerId, modelId, paymentType, withPhoto, column, order,
+        fromYear, toYear, fromMileage, toMileage, fromPrice, toPrice,
+        fromPrepayment, toPrepayment, fromInstallmentAmount, toInstallmentAmount) =>
+          val ranges = ListRanges(
+            fromYear -> toYear, fromMileage -> toMileage,
+            fromPrice -> toPrice, fromPrepayment -> toPrepayment,
+            fromInstallmentAmount -> toInstallmentAmount
+          )
+          val specs = ListSpecs(sellerId, modelId, paymentType, withPhoto, column, order, ranges)
+          adService.list(specs, request.login.map(_.userId), offset ~ length).map(_.map(refineResult)).asJson
+      }
+    }
+  }
+
+  private val refineResult: ((SellAd, Boolean)) => Map[String, JsValue] = {
+    case (ad, owner) => Map("ad" -> Json.toJson(ad), "owner" -> JsBoolean(owner))
   }
 
 }

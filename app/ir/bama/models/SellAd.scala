@@ -111,12 +111,12 @@ object CreditPayment {
   implicit val format: OFormat[CreditPayment] = Json.format[CreditPayment]
 }
 
-case class InstallmentPayment(prePaids: Option[Seq[Long]], period: PaymentPeriod, ticks: Int,
-                              numberOfPayments: Int, amountPerPayment: Long)
+case class InstallmentPayment(prepayments: Option[Seq[Long]], period: PaymentPeriod, ticks: Int,
+                              numberOfInstallments: Int, amountPerInstallment: Long)
   extends Payment(PaymentType.INSTALLMENT) {
 
-  override lazy val initialPrice: Long = prePaids.map(_.sum).getOrElse(0L)
-  override lazy val finalPrice: Long = initialPrice + numberOfPayments * amountPerPayment
+  override lazy val initialPrice: Long = prepayments.map(_.sum).getOrElse(0L)
+  override lazy val finalPrice: Long = initialPrice + numberOfInstallments * amountPerInstallment
 
 }
 
@@ -125,8 +125,8 @@ object InstallmentPayment {
   implicit val format: OFormat[InstallmentPayment] = Json.format[InstallmentPayment]
 
   def apply(ip: Long, fp: Long, period: PaymentPeriod, ticks: Int,
-            numberOfPayments: Int, amountPerPayment: Long): InstallmentPayment =
-    new InstallmentPayment(None, period, ticks, numberOfPayments, amountPerPayment) {
+            numberOfInstallments: Int, amountPerInstallment: Long): InstallmentPayment =
+    new InstallmentPayment(None, period, ticks, numberOfInstallments, amountPerInstallment) {
       override lazy val initialPrice: Long = ip
       override lazy val finalPrice: Long = fp
     }

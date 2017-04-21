@@ -20,7 +20,6 @@ import javax.inject.{Inject, Singleton}
 
 import ir.bama.models.City
 import ir.bama.repositories.CityRepo
-import ir.bama.utils.Range
 
 import scala.concurrent.{ExecutionContext, Future}
 

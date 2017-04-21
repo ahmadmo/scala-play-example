@@ -29,7 +29,7 @@ import ir.bama.utils.PasswordLike
 import play.api.data.Form
 import play.api.data.Forms.{mapping, nonEmptyText}
 import play.api.http.HeaderNames
-import play.api.libs.json.{JsString, JsValue, Json, OFormat}
+import play.api.libs.json.{JsValue, Json, OFormat}
 import play.api.mvc.{Action, _}
 import play.api.{Configuration, Logger}
 
@@ -179,7 +179,7 @@ class AuthController @Inject()(userService: UserService, system: ActorSystem, co
         case _ => Err("Unauthorized Access").asJsonError(Results.Unauthorized).future
       }
     }
-    case _ => Action(Err(s"Invalid target.", "target" -> JsString(from)).asJsonError)
+    case _ => Action(Err(s"Invalid target.").asJsonError)
   }
 
   sealed trait Token {

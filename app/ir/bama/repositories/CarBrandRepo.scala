@@ -19,7 +19,6 @@ package ir.bama.repositories
 import javax.inject.{Inject, Singleton}
 
 import ir.bama.models.CarBrand
-import ir.bama.utils.Range
 import play.api.db.slick.DatabaseConfigProvider
 import slick.lifted.ProvenShape
 import slick.sql.SqlProfile.ColumnOption.NotNull

@@ -46,7 +46,6 @@ POST          /ad/submit                                            ir.bama.cont
 PUT           /ad/submit/:id                                        ir.bama.controllers.SellAdController.resubmit(id: Long)
 PUT           /ad/cancel/:id                                        ir.bama.controllers.SellAdController.cancel(id: Long)
 GET           /ad/info/:id                                          ir.bama.controllers.SellAdController.load(id: Long)
-GET           /ad/list                                              ir.bama.controllers.SellAdController.list(offset: Int ?= 0, length: Int ?= 10)
-GET           /ad/list/:sellerId                                    ir.bama.controllers.SellAdController.listBySellerId(sellerId: Long, offset: Int ?= 0, length: Int ?= 10)
 PUT           /ad/view/:id                                          ir.bama.controllers.SellAdController.incrementViews(id: Long)
 PUT           /ad/view/phone/:id                                    ir.bama.controllers.SellAdController.incrementPhoneNumberViews(id: Long)
+GET           /ad/list                                              ir.bama.controllers.SellAdController.list(offset: Int ?= 0, length: Int ?= 10)

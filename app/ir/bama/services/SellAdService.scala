@@ -24,8 +24,8 @@ import akka.pattern.ask
 import akka.util.Timeout
 import ir.bama.models.SellerType.SellerType
 import ir.bama.models._
+import ir.bama.repositories.SellAdRepo.ListSpecs
 import ir.bama.repositories.SellAdRepo
-import ir.bama.utils.Range
 import play.api.http.Status._
 
 import scala.concurrent.duration.{Duration, DurationLong}
@@ -201,15 +201,9 @@ class SellAdService @Inject()(adRepo: SellAdRepo, sellerService: SellerService, 
     }
   }
 
-  def list(maybeUserId: Option[Long], range: Option[Range]): Future[Seq[(SellAd, Boolean)]] = db.run {
+  def list(specs: ListSpecs, maybeUserId: Option[Long], range: Option[Range]): Future[Seq[(SellAd, Boolean)]] = db.run {
     findSellerId(maybeUserId) { maybeSellerId =>
-      repo.list(maybeSellerId, visibleStatuses, range)
-    }
-  }
-
-  def listBySellerId(sellerId: Long, maybeUserId: Option[Long], range: Option[Range]): Future[Seq[(SellAd, Boolean)]] = db.run {
-    findSellerId(maybeUserId) { maybeSellerId =>
-      repo.listBySellerId(sellerId, maybeSellerId, visibleStatuses, range)
+      repo.list(specs, maybeSellerId, visibleStatuses, range)
     }
   }
 

@@ -181,9 +181,9 @@ package object controllers {
   }
 
   implicit class FormLike[A](val form: Form[A]) extends AnyVal {
+    def map(block: (A) => Future[Result])(implicit r: Request[_]): Future[Result] = fold(form.bindFromRequest, block)
     def map(data: JsValue)(block: (A) => Future[Result]): Future[Result] = fold(form.bind(data), block)
     def map(data: Map[String, Seq[String]])(block: (A) => Future[Result]): Future[Result] = fold(form.bindFromRequest(data), block)
-    def map(block: (A) => Future[Result])(implicit r: Request[_]): Future[Result] = fold(form.bindFromRequest, block)
     private def fold(form: Form[A], block: (A) => Future[Result]) = form.fold(
       formWithErrors => formWithErrors.errors.asJsonError.future,
       block.apply

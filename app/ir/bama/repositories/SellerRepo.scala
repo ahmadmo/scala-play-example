@@ -21,7 +21,6 @@ import javax.inject.{Inject, Singleton}
 
 import ir.bama.models.SellerType.SellerType
 import ir.bama.models._
-import ir.bama.utils.Range
 import play.api.db.slick.DatabaseConfigProvider
 import shapeless.syntax.std.tuple._
 import slick.lifted.{ColumnOrdered, ForeignKeyQuery, PrimaryKey, ProvenShape}
@@ -206,7 +205,7 @@ class SellerRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, cityRepo: C
   def listByTypeAndProvinceId(`type`: SellerType, provinceId: Long, range: Option[Range]): DBIO[Seq[Seller[_]]] =
     listByQueryAndProvinceId(query.filter(_.sellerType === `type`), provinceId, range)
 
-  private def listByQueryAndProvinceId(query: Query[SellerTable, Seller[_], Seq], provinceId: Long, range: Option[Range]) = {
+  private def listByQueryAndProvinceId(query: Q[SellerTable], provinceId: Long, range: Option[Range]) = {
     val q = (for {
       s: SellerTable <- query
       c: cityRepo.CityTable <- cityRepo.query if c.id === s.cityId
@@ -220,7 +219,7 @@ class SellerRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, cityRepo: C
   def listByTypeAndCityId(`type`: SellerType, cityId: Long, range: Option[Range]): DBIO[Seq[Seller[_]]] =
     listByQuery(query.filter(s => s.sellerType === `type` && s.cityId === cityId), range)
 
-  private def listByQuery(query: Query[SellerTable, Seller[_], Seq], range: Option[Range],
+  private def listByQuery(query: Q[SellerTable], range: Option[Range],
                           sortBy: (SellerTable) => ColumnOrdered[_] = _.registrationDate.asc) =
     pagedQuery[SellerTable](query.filter(isPublic).sortBy(sortBy), range)
       .map(s => (s, s.cityId)).result

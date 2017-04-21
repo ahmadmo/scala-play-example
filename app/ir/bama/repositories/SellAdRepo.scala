@@ -30,7 +30,10 @@ import ir.bama.models.PaymentPeriod.PaymentPeriod
 import ir.bama.models.PaymentType.PaymentType
 import ir.bama.models.SellAdStatus.SellAdStatus
 import ir.bama.models._
-import ir.bama.utils.{Range, RangeLike}
+import ir.bama.repositories.SellAdRepo.SortColumn.SortColumn
+import ir.bama.repositories.SellAdRepo.{ListSpecs, SortColumn}
+import ir.bama.repositories.SortOrder.SortOrder
+import ir.bama.utils.RangeLike
 import play.api.db.slick.DatabaseConfigProvider
 import shapeless.syntax.std.tuple._
 import slick.lifted.{ColumnOrdered, ForeignKeyQuery, PrimaryKey, ProvenShape}
@@ -51,7 +54,7 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
 
   implicit val sellAdStatusMapper: BaseColumnType[SellAdStatus] = enumMapper(SellAdStatus)
 
-  private type SellAdRow = (Option[Long], Long, Long, String, Option[String], LocalDateTime, Int, Int, SellAdStatus, PaymentRow, CarRow)
+  private type SellAdRow = (Option[Long], Long, Long, String, Option[String], LocalDateTime, Int, Int, SellAdStatus, Boolean, PaymentRow, CarRow)
 
   class SellAdTable(tag: Tag) extends Table[SellAd](tag, "T_SELL_AD") with PaymentTable with CarTable {
 
@@ -78,9 +81,11 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
 
     def adStatus: Rep[SellAdStatus] = column[SellAdStatus]("C_AD_STATUS", O.SqlType("VARCHAR"), O.Length(255), NotNull)
 
+    def hasPhoto: Rep[Boolean] = column[Boolean]("C_HAS_PHOTO", NotNull)
+
     override def * : ProvenShape[SellAd] =
       (id.?, sellerId, cityId, venue, phoneNumber.?,
-        lastSubmissionDate, count, soldCount, adStatus,
+        lastSubmissionDate, count, soldCount, adStatus, hasPhoto,
         paymentProjection, carProjection) <> (toSellAd, fromSellAd)
 
   }
@@ -104,13 +109,13 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
 
     def ticks: Rep[Int] = column[Int]("C_TICKS", Nullable)
 
-    def numberOfPayments: Rep[Int] = column[Int]("C_NUMBER_OF_PAYMENTS", Nullable)
+    def numberOfInstallments: Rep[Int] = column[Int]("C_NUMBER_OF_INSTALLMENTS", Nullable)
 
-    def amountPerPayment: Rep[Long] = column[Long]("C_AMOUNT_PER_PAYMENT", Nullable)
+    def amountPerInstallment: Rep[Long] = column[Long]("C_AMOUNT_PER_INSTALLMENT", Nullable)
 
     def paymentProjection: ProvenShape[PaymentRow] =
       (paymentType, initialPrice, finalPrice,
-        paymentPeriod.?, ticks.?, numberOfPayments.?, amountPerPayment.?)
+        paymentPeriod.?, ticks.?, numberOfInstallments.?, amountPerInstallment.?)
 
   }
 
@@ -210,31 +215,31 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
 
   }
 
-  type PrePaid = (Long, Int, Long)
+  type Prepayment = (Long, Int, Long)
 
-  class PrePaidTable(tag: Tag) extends Table[PrePaid](tag, "T_PRE_PAID") {
+  class PrepaymentTable(tag: Tag) extends Table[Prepayment](tag, "T_PREPAYMENT") {
 
     def adId: Rep[Long] = column[Long]("C_AD_ID", NotNull)
 
-    def ad: ForeignKeyQuery[_, SellAd] = foreignKey("FK_AD_PRE_PAID", adId, query)(_.id, onDelete = ForeignKeyAction.Cascade)
+    def ad: ForeignKeyQuery[_, SellAd] = foreignKey("FK_AD_PREPAYMENT", adId, query)(_.id, onDelete = ForeignKeyAction.Cascade)
 
     def order: Rep[Int] = column[Int]("C_ORDER", NotNull)
 
     def amount: Rep[Long] = column[Long]("C_AMOUNT", NotNull)
 
-    def pk: PrimaryKey = primaryKey("PK_PRE_PAID", (adId, order))
+    def pk: PrimaryKey = primaryKey("PK_PREPAYMENT", (adId, order))
 
-    override def * : ProvenShape[PrePaid] = (adId, order, amount)
+    override def * : ProvenShape[Prepayment] = (adId, order, amount)
 
   }
 
   private val toPayment: PaymentRow => Payment = {
-    case row@(paymentType, initialPrice, finalPrice, maybePeriod, maybeTicks, maybePayments, maybeAmount) =>
+    case row@(paymentType, initialPrice, finalPrice, maybePeriod, maybeTicks, maybeInstallments, maybeAmount) =>
       paymentType match {
         case PaymentType.CREDIT => CreditPayment(finalPrice)
-        case PaymentType.INSTALLMENT => (maybePeriod, maybeTicks, maybePayments, maybeAmount) match {
-          case (Some(period), Some(ticks), Some(payments), Some(amount)) =>
-            InstallmentPayment(initialPrice, finalPrice, period, ticks, payments, amount)
+        case PaymentType.INSTALLMENT => (maybePeriod, maybeTicks, maybeInstallments, maybeAmount) match {
+          case (Some(period), Some(ticks), Some(installments), Some(amount)) =>
+            InstallmentPayment(initialPrice, finalPrice, period, ticks, installments, amount)
           case _ => throw new IllegalStateException(s"Invalid row: $row")
         }
         case _ => throw new IllegalStateException(s"Invalid row: $row")
@@ -245,7 +250,7 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
     val row = (payment.`type`, payment.initialPrice, payment.finalPrice)
     payment match {
       case _: CreditPayment => row ++ (None, None, None, None)
-      case x: InstallmentPayment => row ++ (Some(x.period), Some(x.ticks), Some(x.numberOfPayments), Some(x.amountPerPayment))
+      case x: InstallmentPayment => row ++ (Some(x.period), Some(x.ticks), Some(x.numberOfInstallments), Some(x.amountPerInstallment))
       case _ => throw new IllegalStateException
     }
   }
@@ -258,13 +263,13 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
       car.status, car.mileage, car.gearBox, car.fuelType, car.bodyDescription, car.bodyColor, car.cabinColor)
 
   private val toSellAd: SellAdRow => SellAd = {
-    case (id, _, _, venue, phoneNumber, lastSubmissionDate, count, soldCount, adStatus, paymentRow, carRow) =>
+    case (id, _, _, venue, phoneNumber, lastSubmissionDate, count, soldCount, adStatus, _, paymentRow, carRow) =>
       SellAd(id, None, None, venue, phoneNumber, None, lastSubmissionDate, count, soldCount, adStatus, toPayment(paymentRow), toCar(carRow), None)
   }
 
   private val fromSellAd: SellAd => Option[SellAdRow] = { ad =>
     Some((ad.id, ad.seller.flatMap(_.id).get, ad.city.flatMap(_.id).get, ad.venue, ad.phoneNumber,
-      ad.lastSubmissionDate, ad.count, ad.soldCount, ad.status, fromPayment(ad.payment), fromCar(ad.car)))
+      ad.lastSubmissionDate, ad.count, ad.soldCount, ad.status, ad.car.photos.exists(_.nonEmpty), fromPayment(ad.payment), fromCar(ad.car)))
   }
 
   override type TableType = SellAdTable
@@ -274,7 +279,7 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
   val submissionDates: TableQuery[SubmissionDateTable] = TableQuery[SubmissionDateTable]
   val stats: TableQuery[StatsTable] = TableQuery[StatsTable]
   val carPhotos: TableQuery[CarPhotoTable] = TableQuery[CarPhotoTable]
-  val prePaids: TableQuery[PrePaidTable] = TableQuery[PrePaidTable]
+  val prepayments: TableQuery[PrepaymentTable] = TableQuery[PrepaymentTable]
 
   override def persist(ad: SellAd): DBIO[Long] = {
     val insertAd = super.persist(ad).flatMap { adId =>
@@ -292,7 +297,7 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
       case _: CreditPayment => insertAd.transactionally
       case x: InstallmentPayment =>
         insertAd.flatMap { adId =>
-          (prePaids ++= (x.prePaids match {
+          (prepayments ++= (x.prepayments match {
             case Some(amounts) => amounts.zipWithIndex.map {
               case (amount, idx) => (adId, idx, amount)
             }
@@ -342,8 +347,8 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
         }).flatMap { refinedAd =>
           ad.payment match {
             case _: CreditPayment => DBIO.successful(refinedAd)
-            case x: InstallmentPayment => prePaidsAction(adId).map { prePaidAmounts =>
-              refinedAd.copy(payment = x.copy(prePaids = Some(prePaidAmounts)))
+            case x: InstallmentPayment => prepaymentsAction(adId).map { amounts =>
+              refinedAd.copy(payment = x.copy(prepayments = Some(amounts)))
             }
           }
         }.map(refinedAd => Some(refinedAd, owner))
@@ -376,28 +381,54 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
   def cancel(adId: Long): DBIO[Boolean] =
     query.filter(ad => ad.id === adId && ad.adStatus =!= SellAdStatus.CANCELLED).map(_.adStatus).update(SellAdStatus.CANCELLED).map(_ == 1)
 
-  def list(maybeSellerId: Option[Long], statuses: Seq[models.SellAdStatus.Value],
-           range: Option[Range]): DBIO[Seq[(SellAd, Boolean)]] =
-    listByQuery(query, maybeSellerId, statuses, range)
+  def list(specs: ListSpecs, maybeSellerId: Option[Long], statuses: Seq[models.SellAdStatus.Value],
+           range: Option[Range]): DBIO[Seq[(SellAd, Boolean)]] = {
+    val withPriceFilter: Transformer[SellAdTable] = specs.paymentType match {
+      case Some(PaymentType.INSTALLMENT) =>
+        transformAll[SellAdTable](
+          withLongRange[SellAdTable](specs.ranges.prepayment, _.initialPrice),
+          withLongRange[SellAdTable](specs.ranges.installmentAmount, _.amountPerInstallment))
+      case _ =>
+        withLongRange[SellAdTable](specs.ranges.price, _.finalPrice)
+    }
+    val withFilter: Transformer[SellAdTable] = transformAll[SellAdTable](
+      maybeTransformAll[SellAdTable](
+        specs.sellerId.map(id => _.filter(_.sellerId === id)),
+        specs.modelId.map(id => _.filter(_.modelId === id)),
+        specs.paymentType.map(p => _.filter(_.paymentType === p)),
+        specs.withPhoto.map(b => _.filter(_.hasPhoto === b))),
+      withIntRange[SellAdTable](specs.ranges.year, _.year),
+      withIntRange[SellAdTable](specs.ranges.mileage, _.mileage),
+      withPriceFilter)
+    val sortBy: (SellAdTable) => ColumnOrdered[_] = specs.sortOrder match {
+      case SortOrder.ASC => specs.sortColumn match {
+        case SortColumn.DATE => _.lastSubmissionDate asc
+        case SortColumn.PRICE => _.finalPrice asc
+        case SortColumn.YEAR => _.year asc
+        case SortColumn.MILEAGE => _.mileage asc
+      }
+      case SortOrder.DESC => specs.sortColumn match {
+        case SortColumn.DATE => _.lastSubmissionDate desc
+        case SortColumn.PRICE => _.finalPrice desc
+        case SortColumn.YEAR => _.year desc
+        case SortColumn.MILEAGE => _.mileage desc
+      }
+    }
+    listByQuery(withFilter(query), maybeSellerId, statuses, range, Seq(sortBy, _.id asc))
+  }
 
-  def listBySellerId(sellerId: Long, maybeSellerId: Option[Long],
-                     statuses: Seq[models.SellAdStatus.Value], range: Option[Range]): DBIO[Seq[(SellAd, Boolean)]] =
-    listByQuery(query.filter(_.sellerId === sellerId), maybeSellerId, statuses, range)
-
-  private def listByQuery(query: Query[SellAdTable, SellAd, Seq], maybeSellerId: Option[Long],
+  private def listByQuery(query: Q[SellAdTable], maybeSellerId: Option[Long],
                           statuses: Seq[models.SellAdStatus.Value], range: Option[Range],
                           sortByFields: Seq[(SellAdTable) => ColumnOrdered[_]] = Seq(_.lastSubmissionDate desc, _.id asc)) = {
-    val listQuery = sortByFields.foldLeft {
+    val listQuery = sortByFields.foldRight {
       maybeSellerId match {
         case Some(sellerId) => query.filter { ad =>
           ad.sellerId === sellerId || ad.adStatus.inSet(statuses)
         }
-        case _ => query.filter { ad =>
-          ad.adStatus.inSet(Seq(SellAdStatus.SUBMITTED, SellAdStatus.RESUBMITTED))
-        }
+        case _ => query.filter(_.adStatus.inSet(statuses))
       }
     } {
-      case (q, f) => q.sortBy(f)
+      case (f, q) => q.sortBy(f)
     }
     pagedQuery[SellAdTable](listQuery, range).map { ad =>
       (ad, ad.sellerId, ad.cityId, ad.modelId)
@@ -442,8 +473,8 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
   private def listCarPhotos(adId: Long, range: Option[Range]) =
     pagedQuery[CarPhotoTable](carPhotos.filter(_.adId === adId).sortBy(_.order asc), range).map(_.photo).result
 
-  private def prePaidsAction(adId: Long) =
-    prePaids.filter(_.adId === adId).sortBy(_.order asc).map(_.amount).result
+  private def prepaymentsAction(adId: Long) =
+    prepayments.filter(_.adId === adId).sortBy(_.order asc).map(_.amount).result
 
   def incrementViews(adId: Long): DBIO[Boolean] = incrementValue {
     stats.filter(_.adId === adId).map(_.adViews)
@@ -458,5 +489,27 @@ class SellAdRepo @Inject()(dbConfigProvider: DatabaseConfigProvider, sellerRepo:
       case Some(value) => query.update(value + 1).map(_ == 1)
       case _ => DBIO.successful(false)
     }
+
+}
+
+object SellAdRepo {
+
+  object SortColumn extends Enumeration {
+    val DATE = Value("DATE")
+    val PRICE = Value("PRICE")
+    val YEAR = Value("YEAR")
+    val MILEAGE = Value("MILEAGE")
+    type SortColumn = Value
+  }
+
+  case class ListRanges(year: (Option[Int], Option[Int]),
+                        mileage: (Option[Int], Option[Int]),
+                        price: (Option[Long], Option[Long]),
+                        prepayment: (Option[Long], Option[Long]),
+                        installmentAmount: (Option[Long], Option[Long]))
+
+  case class ListSpecs(sellerId: Option[Long], modelId: Option[Long],
+                       paymentType: Option[PaymentType], withPhoto: Option[Boolean],
+                       sortColumn: SortColumn, sortOrder: SortOrder, ranges: ListRanges)
 
 }

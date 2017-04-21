@@ -24,15 +24,15 @@ import org.mindrot.jbcrypt.{BCrypt => B}
 package object utils {
 
   implicit class RangeLike(val offset: Int) extends AnyVal {
-    def ~(length: Int): Option[Range] = Some(Range.at(offset, length))
+    def ~(length: Int): Option[Range] = Some(Range(offset, offset + length))
   }
 
   implicit class OptionalRangeLike(val offset: Option[Int]) {
     def ~(length: Option[Int]): Option[Range] =
       (offset, length) match {
-        case (Some(o), Some(l)) => Some(Range.at(o, l))
-        case (Some(o), None) => Some(Range.at(o, 10))
-        case (None, Some(l)) => Some(Range.at(0, l))
+        case (Some(o), Some(l)) => Some(Range(o, o + l))
+        case (Some(o), None) => Some(Range(o, 10))
+        case (None, Some(l)) => Some(Range(0, l))
         case (None, None) => None
       }
   }

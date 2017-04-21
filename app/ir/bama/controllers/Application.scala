@@ -52,7 +52,7 @@ class Application @Inject()(provinceRepo: ProvinceRepo, cityRepo: CityRepo,
         val tablesToBeCreated = Seq(
           provinceRepo.query, cityRepo.query, carBrandRepo.query, carModelRepo.query,
           userRepo.query, userLoginRepo.query, sellerRepo.query, sellerRepo.phoneNumbers,
-          sellAdRepo.query, sellAdRepo.submissionDates, sellAdRepo.stats, sellAdRepo.carPhotos, sellAdRepo.prePaids
+          sellAdRepo.query, sellAdRepo.submissionDates, sellAdRepo.stats, sellAdRepo.carPhotos, sellAdRepo.prepayments
         ).filterNot(t => names.contains(t.baseTableRow.tableName))
         DBIO.sequence(tablesToBeCreated.map(_.schema.create))
       }.transactionally
