@@ -5,7 +5,7 @@ Completely written in [Scala](http://www.scala-lang.org/) programming language, 
  * Play framework [v2.5.14](https://playframework.com/)
  * Slick FRM [v3.2.0](http://slick.lightbend.com/)
 
-What you wil find in this demo:
+What you will find in this demo:
  * How to add more abstraction to Slick ([here](https://github.com/ahmadmo/bama-api-demo/blob/master/app/ir/bama/repositories/BaseRepo.scala))
  * Auto table generation on startup using Slick ([here](https://github.com/ahmadmo/bama-api-demo/blob/master/app/ir/bama/controllers/Application.scala))
  * Handling complex forms in Play! ([here](https://github.com/ahmadmo/bama-api-demo/blob/master/app/ir/bama/controllers/SellAdController.scala) or [here](https://github.com/ahmadmo/bama-api-demo/blob/master/app/ir/bama/controllers/SellerController.scala))
