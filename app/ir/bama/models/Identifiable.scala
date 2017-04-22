@@ -20,7 +20,5 @@ package ir.bama.models
   * @author ahmad
   */
 trait Identifiable {
-
-  def id: Option[Long]
-
+  val id: Option[Long]
 }

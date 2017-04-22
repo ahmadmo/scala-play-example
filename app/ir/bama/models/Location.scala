@@ -22,7 +22,7 @@ import play.api.libs.json.{Json, OFormat}
   * @author ahmad
   */
 trait Location extends Identifiable {
-  def name: String
+  val name: String
 }
 
 case class Province(id: Option[Long], name: String) extends Location

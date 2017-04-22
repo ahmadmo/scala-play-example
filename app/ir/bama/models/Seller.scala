@@ -43,9 +43,9 @@ abstract class Seller[T](val `type`: SellerType)
   val phoneNumbers: Option[Seq[String]]
 
   // TODO: use Quicklens instead
-  private final val userLens = lens[T] >> 'user
-  private final val cityLens = lens[T] >> 'city
-  private final val phoneNumbersLens = lens[T] >> 'phoneNumbers
+  private val userLens = lens[T] >> 'user
+  private val cityLens = lens[T] >> 'city
+  private val phoneNumbersLens = lens[T] >> 'phoneNumbers
 
   final def withUser(user: User): T = userLens.modify(self)(_ => Some(user))
 
