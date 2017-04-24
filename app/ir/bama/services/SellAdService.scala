@@ -84,7 +84,7 @@ class SellAdService @Inject()(adRepo: SellAdRepo, sellerService: SellerService, 
               } catch {
                 case _: InvalidActorNameException => self ! msg
               }
-            case _ => currentSender ! None
+            case _ => currentSender ! Right(None)
           }
       }
     }
