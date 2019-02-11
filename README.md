@@ -22,7 +22,6 @@ Currently using H2 db (see [here](https://github.com/ahmadmo/scala-play-example/
  * Play with Slick thread-pool & connection-pool configurations
  * Do some load & performance tests using [gatling](http://gatling.io/)
  * Provide comparison between Slick and Hibernate ORM
- * what else?
 
 ### API
 
