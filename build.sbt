@@ -1,4 +1,4 @@
-name := "bama_api_demo"
+name := "scala_play_example"
 
 version := "1.0"
 
